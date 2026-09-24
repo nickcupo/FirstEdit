@@ -1,0 +1,14 @@
+{
+  "folder": "/scratch/support/learned",
+  "error": "",
+  "keepers": {"photos": 0, "shoots": 0, "at": ""},
+  "last_run": null,
+  "queued": false,
+  "due": false,
+  "new_to_learn_from": [],
+  "running": false,
+  "job": null,
+  "headline": "It learns only from shoots you have finished. Nothing new is used until it has been checked against every photograph you kept.",
+  "learners": [],
+  "fixed": []
+}

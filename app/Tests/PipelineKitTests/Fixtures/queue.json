@@ -1,0 +1,43 @@
+{
+    "queue": [
+        {
+            "id": 16,
+            "kind": "gather",
+            "title": "gathering the keepers of 2026-01-01-scratch",
+            "shoot": "2026-01-01-scratch",
+            "does": "Build the folder of your keepers, each with its preset beside it.",
+            "why": "",
+            "kept": true,
+            "ready": false,
+            "why_not": "2026-01-01-scratch has not been culled yet, so there is nothing to gather"
+        },
+        {
+            "id": 17,
+            "kind": "stor-check",
+            "title": "checking every original of 2026-09-13-dog",
+            "shoot": "2026-09-13-dog",
+            "does": "Read every original back off the disk and check it.",
+            "why": "",
+            "kept": true,
+            "ready": true,
+            "why_not": ""
+        }
+    ],
+    "held": false,
+    "waiting": 2,
+    "listed": 3,
+    "fraction": 0.0,
+    "pass": 3,
+    "done": [],
+    "skipped": [],
+    "running": true,
+    "from_list": true,
+    "id": 15,
+    "kind": "presets",
+    "title": "presets for 2026-09-13-dog",
+    "shoot": "2026-09-13-dog",
+    "label": "",
+    "remaining_text": "",
+    "job_fraction": 0.0,
+    "background": false
+}

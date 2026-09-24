@@ -1,0 +1,80 @@
+{
+ "folder": "tests/fixtures/pets",
+ "sharp_floor": 1.9,
+ "note": "Oxford-IIIT Pet (Parkhi et al., CVPR 2012), CC BY-SA 4.0; see tests/fixtures/pets/ATTRIBUTION.md. YuNet reads each of these heads as a human face; the animal gate must stop it vetoing the frame, so every verdict is pass.",
+ "frames": {
+  "Bengal_137": {
+   "verdict": "pass"
+  },
+  "Birman_15": {
+   "verdict": "pass"
+  },
+  "Birman_162": {
+   "verdict": "pass"
+  },
+  "Bombay_106": {
+   "verdict": "pass"
+  },
+  "Bombay_166": {
+   "verdict": "no-face",
+   "note": "a black cat: YuNet finds the head, CLIP then reads it as turned away or not a face, so nothing is judged. Either way the frame is not vetoed."
+  },
+  "Ragdoll_187": {
+   "verdict": "pass"
+  },
+  "Ragdoll_190": {
+   "verdict": "pass"
+  },
+  "Russian_Blue_199": {
+   "verdict": "pass"
+  },
+  "Sphynx_1": {
+   "verdict": "pass"
+  },
+  "Sphynx_102": {
+   "verdict": "pass"
+  },
+  "Sphynx_132": {
+   "verdict": "pass"
+  },
+  "Sphynx_144": {
+   "verdict": "pass"
+  },
+  "american_bulldog_151": {
+   "verdict": "pass"
+  },
+  "american_pit_bull_terrier_129": {
+   "verdict": "pass"
+  },
+  "american_pit_bull_terrier_166": {
+   "verdict": "pass"
+  },
+  "american_pit_bull_terrier_186": {
+   "verdict": "pass"
+  },
+  "american_pit_bull_terrier_190": {
+   "verdict": "pass"
+  },
+  "great_pyrenees_159": {
+   "verdict": "pass"
+  },
+  "great_pyrenees_181": {
+   "verdict": "pass"
+  },
+  "leonberger_189": {
+   "verdict": "pass"
+  },
+  "miniature_pinscher_176": {
+   "verdict": "pass"
+  },
+  "pomeranian_144": {
+   "verdict": "pass"
+  },
+  "pug_151": {
+   "verdict": "pass"
+  },
+  "shiba_inu_125": {
+   "verdict": "pass"
+  }
+ }
+}

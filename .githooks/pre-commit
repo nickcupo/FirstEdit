@@ -1,0 +1,110 @@
+#!/bin/zsh
+# This repository is public and MIT. Two things must never reach it by accident.
+#
+# 1. Domain vocabulary. The workflow here is general; one photographer's subject
+#    matter is not, and it lives in a private extension. A word that slips into
+#    a commit is in the history for good, and rewriting a published history is
+#    not a real option.
+# 2. Work that has not been placed yet. reel.py and spread.py sat untracked in
+#    this tree for days; one `git add -A` would have published them, and MIT is
+#    irrevocable for anything released under it.
+#
+# Install once:  git config core.hooksPath .githooks
+#   and, in the maintainer's clone, the word list (see vocab.zsh):
+#                git config photopipeline.vocabfile /path/to/vocab.txt
+# Bypass once:   git commit --no-verify   (know why you are doing it)
+#
+# commit-msg runs the same vocabulary check over the message.
+
+emulate -L zsh
+set -e
+source "${0:A:h}/vocab.zsh"
+
+staged=("${(@f)$(git diff --cached --name-only --diff-filter=ACM)}")
+[[ -z "${staged[1]}" ]] && exit 0
+
+fail=0
+
+# --- 1. vocabulary, in added lines and in the names of added files ---------
+# Added lines only, so an existing occurrence does not block every later commit;
+# git's own regex has no \b, so the scan runs over the diff with grep -E.
+#
+# awk does the picking, not grep. The grep on this machine is ugrep, which reads
+# `^+++` as a repetition operator and aborts the pipeline with "error at
+# position 5" — so the filter that was meant to drop the diff's own +++ headers
+# killed the whole scan instead, and the guard passed every commit silently.
+vocab_load
+case $VOCAB_STATE in
+  unset)
+    echo "pre-commit: no photopipeline.vocabfile in git config, so the vocabulary check is skipped (see .githooks/vocab.zsh)" ;;
+  broken)
+    echo "refusing the commit: $VOCAB_WHY"
+    echo "  Fix the file, or unset photopipeline.vocabfile if this clone has no list to guard."
+    fail=1 ;;
+  ok)
+    scan() {   # $1 what it is, $2 the text
+      local rc=0
+      vocab_scan "$2" || rc=$?
+      if (( rc == 1 )); then
+        echo "refusing the commit: domain vocabulary in $1"
+        echo "$VOCAB_HITS" | head -12 | sed 's/^/    /'
+        echo "  This repo is public. Put it in the private extension, or reword it."
+        fail=1
+      elif (( rc == 2 )); then
+        echo "refusing the commit: the vocabulary scan itself failed on $1"
+        echo "$VOCAB_HITS" | head -3 | sed 's/^/    /'
+        fail=1
+      fi
+    }
+    scan "added lines" "$(git diff --cached -U0 -- "${staged[@]}" | awk '/^\+\+\+/ {next} /^\+/ {print}')"
+    # A name is as public as a line: tests/fixtures/<word>_1.jpg says it too.
+    scan "the name of an added file" "$(git diff --cached --name-only --diff-filter=AR)" ;;
+esac
+
+# --- 2. the files that are deliberately not here ----------------------------
+private=(pipeline/reel.py pipeline/spread.py)
+for p in $private; do
+  if git diff --cached --name-only --diff-filter=A | grep -qx "$p"; then
+    echo "refusing the commit: $p belongs to the private repo, not this one"
+    echo "  If that has genuinely changed, remove it from .githooks/pre-commit first."
+    fail=1
+  fi
+done
+
+# --- 3. no absolute paths or user names in shipped data ---------------------
+# taste.json ships inside the app. It must carry no folder, no user name and no
+# shoot name: venues are keyed by a hash, with a label beside them.
+if git diff --cached --name-only | grep -qx "pipeline/taste.json"; then
+  leak=$(git show ":pipeline/taste.json" | grep -noE '/Users/[A-Za-z0-9._-]+|/Volumes/[A-Za-z0-9._-]+' || true)
+  if [[ -n "$leak" ]]; then
+    echo "refusing the commit: taste.json carries an absolute path"
+    echo "$leak" | head -5 | sed 's/^/    /'
+    fail=1
+  fi
+fi
+
+# --- 4. no home folder of anyone's in any file that goes public --------------
+# This repository is public. `/Users/<name>/...` in a tracked file gives away
+# whose Mac it was written on and what the folders on it are called, and two
+# lines of tests/eval.md carried exactly that until an audit found them. Only
+# the lines being added are read, because the whole tree is checked by
+# app/tools/vocabulary-scan.sh and by RELEASING.md before anything is published.
+#
+# `/Users/someone`, `/Users/photographer` and `/Users/you` are the deliberate
+# placeholders the documents already use, and a home folder written as `~/` is
+# what everything should say, so neither is refused.
+# Every pattern is passed with -e. grep on this machine is ugrep, which reads a
+# leading ^+ as a repetition operator and DIES - and a guard that dies is a
+# guard that passes: this exact mistake let a canary through on its first run.
+homes=$(git diff --cached -U0 --diff-filter=ACMR -- . |
+        grep -E -e '^\+' | grep -v -e '^+++' |
+        grep -noE -e '/Users/[A-Za-z0-9._-]+' |
+        grep -vE -e '/Users/(someone|somebody|photographer|you|your-name|x|USER|NAME)$' || true)
+if [[ -n "$homes" ]]; then
+  echo "refusing the commit: a home folder is spelt out in a file that goes public"
+  echo "$homes" | head -5 | sed 's/^/    /'
+  echo "  Write it as ~/... , or as /Users/someone/... if it has to be absolute."
+  fail=1
+fi
+
+exit $fail

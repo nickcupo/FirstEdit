@@ -1,0 +1,20 @@
+{
+    "queue": [],
+    "held": false,
+    "waiting": 0,
+    "listed": 0,
+    "fraction": 0.0,
+    "pass": 0,
+    "done": [],
+    "skipped": [],
+    "running": false,
+    "from_list": false,
+    "id": 0,
+    "kind": "",
+    "title": "",
+    "shoot": "",
+    "label": "",
+    "remaining_text": "",
+    "job_fraction": 0.0,
+    "background": false
+}

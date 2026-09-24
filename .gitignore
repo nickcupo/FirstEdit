@@ -1,0 +1,44 @@
+# Anchored, all of them. An unanchored name in here matches at every depth,
+# and git is case-insensitive on this disk: `models/` also matched
+# app/Sources/PipelineKit/API/Models/, so the seven files every route is
+# decoded into were never committed and the package did not build from a clean
+# clone. Nothing in this file is left to chance about where it applies.
+/.venv/
+/models/
+/build/
+/dist/
+/snapshots/
+/.ruff_cache/
+/.pytest_cache/
+
+# These four are the only ones that are meant to match anywhere.
+__pycache__/
+*.pyc
+.DS_Store
+
+# SwiftPM's own output.
+/app/.build/
+/app/.swiftpm/
+
+# Symlinks to the private repo. MIT is irrevocable, so these two must never be
+# committed here; .githooks/pre-commit refuses them as well.
+/pipeline/reel.py
+/pipeline/spread.py
+
+# Written by every build, like build/ and dist/: app/build.sh generates it from
+# the bundle it has just assembled and stamps it with that build's version, so a
+# committed copy went stale one commit later with nothing to say so. The one
+# that counts is inside the app, and beside its DMG in dist/.
+/NOTICES.md
+
+# The icon is drawn, not stored: app/make_icon.py writes the whole layered
+# AppIcon.icon document into build/ and actool compiles it. There is no source
+# folder to ignore, and a generated picture committed beside its generator goes
+# stale the first time the generator changes.
+
+# Private working notes, and this machine's own editor settings. Both were kept
+# out by .git/info/exclude, which lives in one clone and is never cloned with
+# it - so on any other machine, and in any fresh clone of this one, they were
+# not ignored at all.
+/docs/ml/
+/.claude/

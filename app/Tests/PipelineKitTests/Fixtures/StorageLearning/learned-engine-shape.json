@@ -1,0 +1,134 @@
+{
+  "folder": "/scratch/support/learned",
+  "error": "",
+  "keepers": {"photos": 773, "shoots": 6, "at": "2026-09-22T14:10:00"},
+  "last_run": {"at": "2026-09-22T14:10:00", "why": "you finished 2026-09-19", "took": 372,
+               "ok": true, "said": [], "learned_from": ["2026-09-16", "2026-09-19"]},
+  "queued": false,
+  "due": true,
+  "new_to_learn_from": ["2026-09-19", "2026-09-21"],
+  "running": false,
+  "job": null,
+  "headline": "It learns only from shoots you have finished. Nothing new is used until it has been checked against every photograph you kept.",
+  "learners": [
+    {
+      "id": "drop-reasons",
+      "title": "Why you drop frames",
+      "changes": "A frame that looks like a reason you have given ranks lower. It never throws a frame out.",
+      "state": "held",
+      "sentence": "Not in use. The new version would stop putting forward 10 of the photographs you kept on 2026-09-21.",
+      "live": null,
+      "candidate": {"version": "2026-09-22T14-08-31", "made": "2026-09-22T14:08:31",
+                    "source": "44 reasons you gave on 1 finished shoot",
+                    "data": {"reasons": 44, "shoots": 1, "frames": 1157}},
+      "training": {
+        "reasons": {
+          "face": {"examples": 24, "shoots": 1, "needs": 0, "state": "one shoot"},
+          "framing": {"examples": 12, "shoots": 1, "needs": 0, "state": "one shoot"},
+          "blur": {"examples": 6, "shoots": 1, "needs": 6, "state": "too few"}
+        },
+        "shoots": ["2026-09-16"], "keepers": 773, "min": 12
+      },
+      "can_go_back": false,
+      "can_stop": false,
+      "can_use_anyway": true,
+      "check": {
+        "kind": "keepers", "at": "2026-09-22T14:09:02", "passed": false,
+        "sentence": "10 of the photographs you kept would stop being put forward.",
+        "shoots": [
+          {"shoot": "2026-09-21", "keepers": 200, "checked": 200, "moved_down": 18,
+           "hidden": 10, "lifted": 1, "passed": false,
+           "why": "10 of the frames you kept would stop being put forward",
+           "frames": [
+             {"shoot": "2026-09-21", "file": "TSC07363.ARW", "stem": "TSC07363", "burst": "12",
+              "scene": "4", "now": "the cull puts it forward", "new": "set aside",
+              "tier_now": "clear win", "tier_new": "probably not", "down": true,
+              "why": "looks like 'face'"},
+             {"shoot": "2026-09-21", "file": "TSC07401.ARW", "stem": "TSC07401", "burst": "14",
+              "scene": "4", "now": "the cull puts it forward", "new": "set aside",
+              "tier_now": "clear win", "tier_new": "probably not", "down": true,
+              "why": "looks like 'face'"},
+             {"shoot": "2026-09-21", "file": "TSC07455.ARW", "stem": "TSC07455", "burst": "18",
+              "scene": "5", "now": "the cull puts it forward", "new": "set aside",
+              "tier_now": "maybe", "tier_new": "probably not", "down": true,
+              "why": "looks like 'framing'"},
+             {"shoot": "2026-09-21", "file": "TSC07512.ARW", "stem": "TSC07512", "burst": "21",
+              "scene": "6", "now": "the cull puts it forward", "new": "set aside",
+              "tier_now": "clear win", "tier_new": "probably not", "down": true,
+              "why": "looks like 'face'"}
+           ]}
+        ],
+        "couldnt_check": []
+      }
+    },
+    {
+      "id": "tier-order",
+      "title": "Which frames of a burst you keep",
+      "changes": "The order the cull puts a burst's frames in, and only on shoots whose light measures like the one it learned from.",
+      "state": "held",
+      "sentence": "Not in use. It would show 13 of your photographs less on 2026-09-19.",
+      "live": null,
+      "candidate": {"version": "2026-09-22T14-09-40", "made": "2026-09-22T14:09:40",
+                    "source": "the 154 photographs you kept on 1 finished shoot",
+                    "data": {"shoots": 1, "keepers": 154}},
+      "training": {"shoots": {"2026-09-16": {"state": "learned", "keepers": 154, "frames": 1157}}},
+      "can_go_back": false,
+      "can_stop": false,
+      "can_use_anyway": true,
+      "check": {
+        "kind": "keepers", "at": "2026-09-22T14:09:55", "passed": false,
+        "sentence": "13 more of the photographs you kept would be shown less than are shown more.",
+        "shoots": [
+          {"shoot": "2026-09-19", "keepers": 368, "checked": 368, "moved_down": 27,
+           "hidden": 0, "lifted": 12, "passed": false,
+           "why": "27 shown less against 12 shown more",
+           "frames": [
+             {"shoot": "2026-09-19", "file": "TSC06120.ARW", "stem": "TSC06120", "burst": "31",
+              "scene": "9", "now": "clear win", "new": "maybe",
+              "tier_now": "clear win", "tier_new": "maybe", "down": true,
+              "why": "another frame of this burst ranks above it now"},
+             {"shoot": "2026-09-19", "file": "TSC06144.ARW", "stem": "TSC06144", "burst": "33",
+              "scene": "9", "now": "clear win", "new": "maybe",
+              "tier_now": "clear win", "tier_new": "maybe", "down": true,
+              "why": "another frame of this burst ranks above it now"}
+           ]},
+          {"shoot": "2026-09-16", "keepers": 154, "checked": 154, "moved_down": 0,
+           "hidden": 0, "lifted": 0, "passed": true, "why": "", "frames": []}
+        ],
+        "couldnt_check": [
+          {"shoot": "2026-09-05-the-gals", "keepers": 12,
+           "why": "its photographs you kept are not all readable"}
+        ]
+      }
+    },
+    {
+      "id": "edit",
+      "title": "Your starting edit",
+      "changes": "Where a new shoot's first sidecar starts. It never re-renders anything you have exported.",
+      "state": "in_use",
+      "sentence": "In use since 22 Sep. New shoots whose light measures like one of these start there.",
+      "live": {"version": "2026-09-22T14-10-02", "since": "2026-09-22", "made": "2026-09-22T14:10:02",
+               "source": "526 finished frames on 2 shoots",
+               "data": {"frames": 526, "venues": 2,
+                        "venue_labels": ["a gym under mixed light", "an evening in town"],
+                        "carried": []}},
+      "candidate": null,
+      "training": {},
+      "can_go_back": true,
+      "can_stop": true,
+      "can_use_anyway": false,
+      "check": {
+        "kind": "edit", "at": "2026-09-22T14:10:02", "passed": true,
+        "keepers": 773, "checked": 773, "moved_down": 0, "hidden": 0, "lifted": 0,
+        "sentence": "It cannot change the cull, so no photograph you kept can move.",
+        "shoots": [], "couldnt_check": []
+      }
+    }
+  ],
+  "fixed": [
+    {"id": "picture-score", "title": "Picture judgement",
+     "sentence": "Built in, not trained on your photographs."},
+    {"id": "face-checks", "title": "Face checks",
+     "sentence": "Fixed rules, checked against 94 faces judged by eye."}
+  ]
+}
