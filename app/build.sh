@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Build "First Edit.app" and its DMG: a relocatable CPython with the
+# Build "FirstEdit.app" and its DMG: a relocatable CPython with the
 # requirements installed, the pipeline, the five small models, exiftool, and
 # the Swift app built from the package in app/. CLIP (1.7 GB) is fetched on
 # first launch, not bundled, so the DMG stays under GitHub's 2 GB release limit.
@@ -48,10 +48,10 @@ BUILD_NO="$(date +%Y%m%d%H%M)"
 PYVER="3.12.14+20260901"
 PYURL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYVER#*+}/cpython-${PYVER}-aarch64-apple-darwin-install_only.tar.gz"
 EXIFTOOL_VER="13.36"
-APP="build/First Edit.app"
+APP="build/FirstEdit.app"
 C="$APP/Contents"
 R="$C/Resources"
-EXE="$C/MacOS/First Edit"
+EXE="$C/MacOS/FirstEdit"
 MARKER="build/gate.json"
 BPY=build/python/bin/python3
 # Everything the bundle is described by lives beside the strings and the icon

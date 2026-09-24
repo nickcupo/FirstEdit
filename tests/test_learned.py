@@ -104,7 +104,7 @@ def test_it_refuses_to_write_inside_the_checkout_or_the_app_bundle(tmp_path, mon
     monkeypatch.setenv("PIPELINE_LEARNED", str(Path(learned.HERE).parent / "learned"))
     with pytest.raises(learned.Refused):
         learned._writable()
-    monkeypatch.setenv("PIPELINE_LEARNED", str(tmp_path / "First Edit.app" / "Contents" / "learned"))
+    monkeypatch.setenv("PIPELINE_LEARNED", str(tmp_path / "FirstEdit.app" / "Contents" / "learned"))
     with pytest.raises(learned.Refused):
         learned._writable()
 

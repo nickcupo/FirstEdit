@@ -180,7 +180,7 @@ struct FirstLaunchTests {
 
         // A relative link at the old name, and every old path still works.
         #expect(SupportMove.kind(s.old) == .link)
-        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: s.old.path) == "First Edit")
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: s.old.path) == "FirstEdit")
         #expect(FileManager.default.fileExists(atPath: s.old.appendingPathComponent("learned/store.json").path))
         #expect(FileManager.default.fileExists(atPath: s.new.appendingPathComponent("extension/studio_ext.py").path))
 

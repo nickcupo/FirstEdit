@@ -26,9 +26,9 @@ public enum FirstLaunch {
 
     /// What it is called now.
     public enum New {
-        public static let name = "First Edit"
+        public static let name = "FirstEdit"
         public static let bundleID = "com.nickcupo.firstedit"
-        public static let folder = "First Edit"
+        public static let folder = "FirstEdit"
     }
 
     public enum Decision: Equatable, Sendable {

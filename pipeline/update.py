@@ -38,7 +38,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from common import APP_NAME, support_dir  # noqa: E402
+from common import APP_BUNDLE_NAME, APP_NAME, support_dir  # noqa: E402
 
 REPO = "nickcupo/first-edit"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -52,8 +52,8 @@ BUNDLE_ID = "com.nickcupo.firstedit"
 AGENT = "first-edit"
 SUPPORT = support_dir()
 UPDATES = SUPPORT / "updates"
-STAGED = UPDATES / "staged" / f"{APP_NAME}.app"
-APP = Path(os.environ.get("PIPELINE_APP_PATH", f"/Applications/{APP_NAME}.app"))
+STAGED = UPDATES / "staged" / f"{APP_BUNDLE_NAME}.app"
+APP = Path(os.environ.get("PIPELINE_APP_PATH", f"/Applications/{APP_BUNDLE_NAME}.app"))
 CURRENT = os.environ.get("PIPELINE_APP_VERSION", "0")
 
 

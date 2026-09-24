@@ -140,7 +140,7 @@ def test_what_the_tool_learns_has_one_writable_home(tmp_path, monkeypatch):
     # tmp_path, so the answer is worked out without looking at his.
     monkeypatch.delenv("PIPELINE_SUPPORT")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    assert common.learned_dir() == tmp_path / "home" / "Library" / "Application Support" / "First Edit" / "learned"
+    assert common.learned_dir() == tmp_path / "home" / "Library" / "Application Support" / "FirstEdit" / "learned"
     assert PIPELINE not in common.learned_dir().parents
 
 

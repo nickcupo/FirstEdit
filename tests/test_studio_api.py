@@ -835,7 +835,7 @@ def test_a_finished_download_is_seen_without_asking_github_again(srv, tmp_path, 
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked GitHub again")))
     assert json.loads(get(srv, "/api/update")[1])["staged"] is False
     # Where update.py stages it, under the app's new name.
-    assert studio.staged_update() == tmp_path / "support" / "updates" / "staged" / "First Edit.app"
+    assert studio.staged_update() == tmp_path / "support" / "updates" / "staged" / "FirstEdit.app"
     studio.staged_update().mkdir(parents=True)
     assert json.loads(get(srv, "/api/update")[1])["staged"] is True
 

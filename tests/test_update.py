@@ -59,8 +59,8 @@ def test_the_app_and_its_staged_update_are_named_first_edit(tmp_path):
     out = subprocess.run([sys.executable, "-c", "import update; print(update.APP); print(update.STAGED)"],
                          cwd=ROOT / "pipeline", env=env, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.splitlines() == ["/Applications/First Edit.app",
-                                       str(tmp_path / "support/updates/staged/First Edit.app")]
+    assert out.stdout.splitlines() == ["/Applications/FirstEdit.app",
+                                       str(tmp_path / "support/updates/staged/FirstEdit.app")]
 
 
 def test_github_is_told_who_is_asking_by_the_new_name(monkeypatch):
@@ -131,8 +131,8 @@ def _app(path: Path) -> Path:
 def _staged(tmp_path: Path, monkeypatch) -> Path:
     """A downloaded DMG and the app already copied out of it."""
     monkeypatch.setattr(update, "UPDATES", tmp_path / "updates")
-    monkeypatch.setattr(update, "STAGED", tmp_path / "updates/staged/First Edit.app")
-    monkeypatch.setattr(update, "APP", tmp_path / "Applications/First Edit.app")
+    monkeypatch.setattr(update, "STAGED", tmp_path / "updates/staged/FirstEdit.app")
+    monkeypatch.setattr(update, "APP", tmp_path / "Applications/FirstEdit.app")
     _app(update.APP)
     _app(update.STAGED)
     dmg = update.UPDATES / "First-Edit-9.9.9.dmg"
@@ -280,7 +280,7 @@ def test_a_failed_swap_says_so_once_instead_of_offering_itself_again(tmp_path, m
 def test_the_build_kind_is_only_what_the_bundle_says(tmp_path, monkeypatch):
     """PlistBuddy prints its complaints on stdout, so "Print: Entry ... Does Not
     Exist" would have become the kind of build this is."""
-    monkeypatch.setattr(update, "APP", tmp_path / "First Edit.app")
+    monkeypatch.setattr(update, "APP", tmp_path / "FirstEdit.app")
     (update.APP / "Contents").mkdir(parents=True)
     (update.APP / "Contents/Info.plist").write_bytes(
         b'<?xml version="1.0"?><!DOCTYPE plist><plist version="1.0"><dict>'

@@ -39,8 +39,9 @@ EXIFTOOL = os.environ.get("PIPELINE_EXIFTOOL", "exiftool")
 # run on a Mac where the app has not been opened since still finds the old
 # folder, and after the rename finds the new one. The archive in iCloud Drive
 # is another matter: it keeps the old name for good (archive.ARCHIVE_NAME).
-APP_NAME = "First Edit"
-FORMER_APP_NAMES = ("Photo Pipeline",)
+APP_NAME = "FirstEdit"
+APP_BUNDLE_NAME = "FirstEdit"
+FORMER_APP_NAMES = ("First Edit", "Photo Pipeline")
 
 
 def _app_support() -> Path:

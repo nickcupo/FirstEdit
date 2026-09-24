@@ -69,7 +69,7 @@ sys.path.insert(0, str(HERE))
 # answer), so the module it shadows is imported under its own two
 # names rather than renamed wholesale.
 from library import is_shoot, shelf  # noqa: E402
-from common import (APP_NAME, FOR_APP_ENV, decision_path, read_cull, EXT, EXIFTOOL, clip_ready, seed_models,  # noqa: E402
+from common import (APP_BUNDLE_NAME, APP_NAME, FOR_APP_ENV, decision_path, read_cull, EXT, EXIFTOOL, clip_ready, seed_models,  # noqa: E402
                     support_dir, write_atomic, write_json_atomic)
 ROOT = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
 _SHELF: tuple = ()
@@ -358,7 +358,7 @@ UPDATE: dict = {}      # the last answer from update.py --check, filled in by a 
 def staged_update() -> Path:
     """Where a downloaded and checked build waits to be installed: update.py's
     STAGED, worked out the same way, when asked."""
-    return support_dir() / "updates" / "staged" / f"{APP_NAME}.app"
+    return support_dir() / "updates" / "staged" / f"{APP_BUNDLE_NAME}.app"
 
 
 def checks_at_start() -> bool:

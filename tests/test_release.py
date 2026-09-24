@@ -66,11 +66,11 @@ BUILT = _app_in_build()
 # ------------------------------------------------------------------ gate.py
 
 def _bundle(tmp_path: Path) -> Path:
-    app = tmp_path / "First Edit.app"
+    app = tmp_path / "FirstEdit.app"
     (app / "Contents/Resources/pipeline").mkdir(parents=True)
     (app / "Contents/Resources/pipeline/cull.py").write_text("print('cull')\n")
     (app / "Contents/MacOS").mkdir(parents=True)
-    (app / "Contents/MacOS/First Edit").write_bytes(b"\xcf\xfa\xed\xfe binary")
+    (app / "Contents/MacOS/FirstEdit").write_bytes(b"\xcf\xfa\xed\xfe binary")
     return app
 
 

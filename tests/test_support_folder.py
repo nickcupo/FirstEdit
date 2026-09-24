@@ -45,8 +45,8 @@ def _as(home: Path, name: str) -> Path:
 
 
 def test_the_names_are_the_new_one_and_the_old_one():
-    assert common.APP_NAME == "First Edit"
-    assert common.FORMER_APP_NAMES == ("Photo Pipeline",)
+    assert common.APP_NAME == "FirstEdit"
+    assert common.FORMER_APP_NAMES == ("First Edit", "Photo Pipeline")
 
 
 def test_the_environment_wins_over_any_folder_on_disk(home, tmp_path, monkeypatch):
@@ -57,7 +57,7 @@ def test_the_environment_wins_over_any_folder_on_disk(home, tmp_path, monkeypatc
 
 
 def test_with_neither_folder_it_is_the_new_name_and_asking_makes_nothing(home):
-    assert common.support_dir() == _as(home, "First Edit")
+    assert common.support_dir() == _as(home, "FirstEdit")
     assert not _as(home, "First Edit").exists(), "asking where it is made one"
     assert common.support_dir(create=True).is_dir()
     assert not _as(home, "Photo Pipeline").exists(), "the old name is never made"
@@ -128,7 +128,7 @@ def test_the_updater_keeps_its_downloads_in_the_same_folder(home, present):
     out = subprocess.run([sys.executable, "-c", "import update; print(update.SUPPORT); print(update.UPDATES)"],
                          cwd=PIPELINE, env=env, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
-    want = _as(home, present or "First Edit")
+    want = _as(home, present or "FirstEdit")
     assert out.stdout.splitlines() == [str(want), str(want / "updates")]
 
 
@@ -229,7 +229,7 @@ def test_the_app_the_updater_and_the_build_name_the_same_app_and_repository():
     with (app / "Resources/Info.plist").open("rb") as fh:
         info = plistlib.load(fh)
     assert info["CFBundleName"] == info["CFBundleDisplayName"] == "FirstEdit"
-    assert info["CFBundleExecutable"] == common.APP_NAME == "First Edit"
+    assert info["CFBundleExecutable"] == "FirstEdit"
     assert f'"/{update.REPO}/issues/new"' in (app / "Sources/PipelineKit/Help/HelpBook.swift").read_text()
     wheels = [ln for ln in (app / "requirements.lock").read_text().splitlines() if "releases/download" in ln]
     assert len(wheels) == 2 and all(f"https://github.com/{update.REPO}/releases/download/" in ln for ln in wheels)

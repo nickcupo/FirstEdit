@@ -4,8 +4,7 @@
   <key>CFBundleName</key><string>FirstEdit</string>
   <key>CFBundleDisplayName</key><string>FirstEdit</string>
   <key>CFBundleIdentifier</key><string>com.nickcupo.firstedit</string>
-  <!-- Keep the installed bundle/executable names for updater compatibility. -->
-  <key>CFBundleExecutable</key><string>First Edit</string>
+     <key>CFBundleExecutable</key><string>FirstEdit</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <!-- Both keys name the asset catalog's icon set. actool writes the same two
        into a partial plist when it compiles AppIcon.xcassets, and app/build.sh

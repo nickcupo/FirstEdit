@@ -22,14 +22,14 @@ struct AppNameTests {
         return try #require(plist as? [String: Any])
     }
 
-    @Test("the bundle displays FirstEdit and preserves its executable and identifier")
+    @Test("the bundle displays FirstEdit and uses its no-space executable name")
     func bundle() throws {
         let info = try Self.infoPlist()
         #expect(info["CFBundleName"] as? String == "FirstEdit")
         #expect(info["CFBundleDisplayName"] as? String == "FirstEdit")
         // app/build.sh copies the binary to Contents/MacOS/$EXE, and macOS
         // opens whatever this key names: the two have to agree.
-        #expect(info["CFBundleExecutable"] as? String == "First Edit")
+        #expect(info["CFBundleExecutable"] as? String == "FirstEdit")
         // Its settings, its notifications and its permissions are filed
         // under this; the first launch copies the old app's settings across.
         #expect(info["CFBundleIdentifier"] as? String == "com.nickcupo.firstedit")

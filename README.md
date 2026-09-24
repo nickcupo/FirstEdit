@@ -145,7 +145,7 @@ where it came from, including the things I measured and did not ship.
 
 ## The app
 
-**FirstEdit** (installed as `First Edit.app`) is the whole thing in one window: put the card in,
+**FirstEdit** (installed as `FirstEdit.app`) is the whole thing in one window: put the card in,
 name the shoot, and it walks the steps — copy the card, cull, choose
 keepers, presets, edit in PhotoLab, Instagram, finish (and reels, between
 Instagram and finish, in a build that carries a reel maker; the public one
@@ -173,9 +173,9 @@ and no tone added.
 
 Installers are available on the [releases page](https://github.com/nickcupo/first-edit/releases).
 The app checks that page for updates and verifies the signing identity before
-installing one. The next display-branding update uses **FirstEdit**; the installed
-bundle remains `First Edit.app` so existing installation and update paths keep
-working. No support folder, saved setting or library is moved by this spelling change.
+installing one. The installed bundle is `FirstEdit.app`; on first launch the
+former `Application Support/First Edit` folder is migrated to
+`Application Support/FirstEdit` without moving or deleting any photographs.
 
 Apple silicon, macOS 15 or newer: `app/Package.swift` builds for
 `.macOS(.v15)` and `app/Resources/Info.plist` promises 15.0. On first launch

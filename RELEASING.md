@@ -8,12 +8,11 @@ other people's machines before you have finished reading this sentence.
 
 ## Display branding: FirstEdit
 
-Use **FirstEdit** in the release title and user-facing copy. This is a display-only
-change: CFBundleName and CFBundleDisplayName use the new spelling, while
-`First Edit.app`, its `First Edit` executable, `com.nickcupo.firstedit`,
-the existing defaults/migration keys, `Application Support/First Edit` and
-`Photo Pipeline Archive` retain their names. Do not move data or rename the
-installed bundle as part of this release. Existing updater paths remain valid.
+Use **FirstEdit** in the release title and user-facing copy. The shipped bundle
+is `FirstEdit.app`, its executable is `FirstEdit`, and its identifier remains
+`com.nickcupo.firstedit`. On first launch, `Application Support/First Edit`
+is migrated to `Application Support/FirstEdit`; photographs and saved work are
+not moved or deleted. `Photo Pipeline Archive` retains its historical name.
 The legacy packaging filenames and disk-image volume label are retained.
 The earlier Photo Pipeline migration section below remains historical guidance.
 
@@ -304,8 +303,8 @@ Check what came out:
 
 ```sh
 ls dist/                                   # First-Edit-0.1.5.dmg and its NOTICES
-codesign --verify --deep --strict --verbose=2 "build/First Edit.app"
-codesign -dv --verbose=4 "build/First Edit.app" 2>&1 | grep -E 'Authority|flags|Identifier'
+codesign --verify --deep --strict --verbose=2 "build/FirstEdit.app"
+codesign -dv --verbose=4 "build/FirstEdit.app" 2>&1 | grep -E 'Authority|flags|Identifier'
 xcrun stapler validate dist/First-Edit-0.1.5.dmg
 spctl --assess --type open --context context:primary-signature -v dist/First-Edit-0.1.5.dmg
 hdiutil attach dist/First-Edit-0.1.5.dmg -nobrowse   # then open the app from the image once, and quit it
@@ -314,8 +313,8 @@ hdiutil attach dist/First-Edit-0.1.5.dmg -nobrowse   # then open the app from th
 And the two questions a person actually asks of a bundle:
 
 ```sh
-/usr/libexec/PlistBuddy -c 'Print :PhotoPipelineBuild' "build/First Edit.app/Contents/Info.plist"   # public
-find "build/First Edit.app" -name 'reel.py' -o -name 'spread.py'   # nothing
+/usr/libexec/PlistBuddy -c 'Print :PhotoPipelineBuild' "build/FirstEdit.app/Contents/Info.plist"   # public
+find "build/FirstEdit.app" -name 'reel.py' -o -name 'spread.py'   # nothing
 ```
 
 Install it over the previous version on a second Mac if there is one: the
@@ -397,7 +396,7 @@ by hand, and none of them is automated.
   2. Quit Photo Pipeline.
   3. Run `ditto` to copy the app to `/Applications/First Edit
      (installing).app`, run `codesign --verify --deep --strict` on it, and
-     rename it to `First Edit.app`.
+     rename it to `FirstEdit.app`.
   4. Keep `Photo Pipeline.app`, out of `/Applications` and out of the Trash:
      `~/Applications/Photo Pipeline (old).app`, for example. It is the undo,
      and the last step in `MIGRATED.json` is to open it. Leave its settings
