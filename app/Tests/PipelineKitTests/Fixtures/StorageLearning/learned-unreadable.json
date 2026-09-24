@@ -1,0 +1,103 @@
+{
+ "folder": "/scratch/support/learned",
+ "error": "The record of what the cull has learned will not read, so nothing new can be learned until it does. Nothing in it was changed: look at it, or move it aside.",
+ "keepers": {},
+ "last_run": null,
+ "queued": false,
+ "new_to_learn_from": [
+  "2026-09-19"
+ ],
+ "due": true,
+ "learners": [
+  {
+   "id": "drop-reasons",
+   "title": "Why you drop frames",
+   "changes": "A frame that looks like a reason you gave for dropping one ranks lower in the cull's order.",
+   "state": "none",
+   "sentence": "Nothing learned yet.",
+   "candidate_state": "",
+   "candidate_sentence": "",
+   "needs_sentence": "Not enough yet to learn why you drop frames: say why when you drop one (press 1–6 after D on Choose Keepers), on a shoot you then finish, and it learns from those.",
+   "needs_lines": [
+    "Not enough yet to learn why you drop frames.",
+    "Say why when you drop one — press 1–6 after D on Choose Keepers — on a shoot you then finish."
+   ],
+   "needs_do": [],
+   "live": null,
+   "candidate": null,
+   "training": {},
+   "can_go_back": false,
+   "can_stop": false,
+   "can_use_anyway": false,
+   "check": null,
+   "learned_from": ""
+  },
+  {
+   "id": "tier-order",
+   "title": "Which frames of a burst you keep",
+   "changes": "The order of the frames the cull puts forward inside a burst.",
+   "state": "none",
+   "sentence": "Nothing learned yet.",
+   "candidate_state": "",
+   "candidate_sentence": "",
+   "needs_sentence": "",
+   "needs_lines": [],
+   "needs_do": [],
+   "live": null,
+   "candidate": null,
+   "training": {},
+   "can_go_back": false,
+   "can_stop": false,
+   "can_use_anyway": false,
+   "check": null,
+   "learned_from": ""
+  },
+  {
+   "id": "edit",
+   "title": "Your starting edit",
+   "changes": "The first preset of a new shoot. It never re-renders anything you exported.",
+   "state": "none",
+   "sentence": "Nothing learned yet.",
+   "candidate_state": "",
+   "candidate_sentence": "",
+   "needs_sentence": "",
+   "needs_lines": [],
+   "needs_do": [],
+   "live": null,
+   "candidate": null,
+   "training": {},
+   "can_go_back": false,
+   "can_stop": false,
+   "can_use_anyway": false,
+   "check": null,
+   "learned_from": ""
+  }
+ ],
+ "unreadable": true,
+ "record": "/scratch/support/learned/manifest.json",
+ "unreadable_why": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+ "measured": {
+  "path": "/scratch/support/learned/measured.jsonl",
+  "bytes": 0,
+  "frames": 0,
+  "rows": 0,
+  "exports": 0,
+  "per_frame": 0,
+  "shoots": {},
+  "words": "0 bytes"
+ },
+ "fixed": [
+  {
+   "id": "picture-score",
+   "title": "Picture judgement",
+   "sentence": "Built in, not trained on your photographs."
+  },
+  {
+   "id": "face-checks",
+   "title": "Face checks",
+   "sentence": "Fixed rules (eyes closed, soft, caught mid-word), checked against faces settled by eye."
+  }
+ ],
+ "running": false,
+ "job": null
+}

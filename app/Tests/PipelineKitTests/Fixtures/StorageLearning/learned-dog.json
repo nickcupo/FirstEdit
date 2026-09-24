@@ -1,0 +1,292 @@
+{
+ "folder": "/scratch/support/learned",
+ "error": "",
+ "keepers": {
+  "photos": 773,
+  "shoots": 6,
+  "at": "2026-09-22T14:10:00"
+ },
+ "last_run": {
+  "at": "2026-09-22T14:10:00",
+  "why": "you finished 2026-09-19",
+  "took": 372,
+  "ok": true,
+  "said": [],
+  "learned_from": [
+   "2026-09-16",
+   "2026-09-19"
+  ]
+ },
+ "queued": false,
+ "due": true,
+ "new_to_learn_from": [
+  "2026-09-13-dog"
+ ],
+ "running": false,
+ "job": null,
+ "headline": "It learns only from shoots you have finished. Nothing new is used until it has been checked against every photograph you kept.",
+ "learners": [
+  {
+   "id": "drop-reasons",
+   "title": "Why you drop frames",
+   "changes": "A frame that looks like a reason you have given ranks lower. It never throws a frame out.",
+   "state": "held",
+   "sentence": "Not in use. The new version would stop putting forward 6 of the photographs you kept on 2026-09-13-dog.",
+   "live": null,
+   "candidate": {
+    "version": "2026-09-22T14-08-31",
+    "made": "2026-09-22T14:08:31",
+    "source": "44 reasons you gave on 1 finished shoot",
+    "data": {
+     "reasons": 44,
+     "shoots": 1,
+     "frames": 1157
+    }
+   },
+   "training": {
+    "reasons": {
+     "face": {
+      "examples": 24,
+      "shoots": 1,
+      "needs": 0,
+      "state": "one shoot"
+     },
+     "framing": {
+      "examples": 12,
+      "shoots": 1,
+      "needs": 0,
+      "state": "one shoot"
+     },
+     "blur": {
+      "examples": 6,
+      "shoots": 1,
+      "needs": 6,
+      "state": "too few"
+     }
+    },
+    "shoots": [
+     "2026-09-16"
+    ],
+    "keepers": 773,
+    "min": 12
+   },
+   "can_go_back": false,
+   "can_stop": false,
+   "can_use_anyway": true,
+   "check": {
+    "kind": "keepers",
+    "at": "2026-09-22T14:09:02",
+    "passed": false,
+    "sentence": "6 of the photographs you kept would stop being put forward.",
+    "shoots": [
+     {
+      "shoot": "2026-09-13-dog",
+      "keepers": 14,
+      "checked": 14,
+      "moved_down": 9,
+      "hidden": 6,
+      "lifted": 1,
+      "passed": false,
+      "why": "6 of the frames you kept would stop being put forward",
+      "frames": [
+       {
+        "shoot": "2026-09-13-dog",
+        "file": "TSC04330.ARW",
+        "stem": "TSC04330",
+        "burst": "3",
+        "scene": "3",
+        "now": "the cull puts it forward",
+        "new": "set aside",
+        "tier_now": "clear win",
+        "tier_new": "probably not",
+        "down": true,
+        "why": "looks like 'face'"
+       },
+       {
+        "shoot": "2026-09-13-dog",
+        "file": "TSC04331.ARW",
+        "stem": "TSC04331",
+        "burst": "3",
+        "scene": "3",
+        "now": "the cull puts it forward",
+        "new": "set aside",
+        "tier_now": "clear win",
+        "tier_new": "probably not",
+        "down": true,
+        "why": "looks like 'face'"
+       },
+       {
+        "shoot": "2026-09-13-dog",
+        "file": "TSC04332.ARW",
+        "stem": "TSC04332",
+        "burst": "3",
+        "scene": "3",
+        "now": "the cull puts it forward",
+        "new": "set aside",
+        "tier_now": "clear win",
+        "tier_new": "probably not",
+        "down": true,
+        "why": "looks like 'framing'"
+       },
+       {
+        "shoot": "2026-09-13-dog",
+        "file": "TSC04344.ARW",
+        "stem": "TSC04344",
+        "burst": "3",
+        "scene": "3",
+        "now": "the cull puts it forward",
+        "new": "set aside",
+        "tier_now": "clear win",
+        "tier_new": "probably not",
+        "down": true,
+        "why": "looks like 'face'"
+       },
+       {
+        "shoot": "2026-09-13-dog",
+        "file": "TSC04363.ARW",
+        "stem": "TSC04363",
+        "burst": "3",
+        "scene": "3",
+        "now": "the cull puts it forward",
+        "new": "set aside",
+        "tier_now": "clear win",
+        "tier_new": "probably not",
+        "down": true,
+        "why": "looks like 'framing'"
+       },
+       {
+        "shoot": "2026-09-13-dog",
+        "file": "TSC04364.ARW",
+        "stem": "TSC04364",
+        "burst": "3",
+        "scene": "3",
+        "now": "the cull puts it forward",
+        "new": "set aside",
+        "tier_now": "clear win",
+        "tier_new": "probably not",
+        "down": true,
+        "why": "looks like 'blur'"
+       }
+      ]
+     }
+    ],
+    "couldnt_check": []
+   }
+  },
+  {
+   "id": "tier-order",
+   "title": "Which frames of a burst you keep",
+   "changes": "The order the cull puts a burst's frames in, and only on shoots whose light measures like the one it learned from.",
+   "state": "held",
+   "sentence": "Not in use. It would show 2 of your photographs less on 2026-09-13-dog.",
+   "live": null,
+   "candidate": {
+    "version": "2026-09-22T14-09-40",
+    "made": "2026-09-22T14:09:40",
+    "source": "the 154 photographs you kept on 1 finished shoot",
+    "data": {
+     "shoots": 1,
+     "keepers": 154
+    }
+   },
+   "training": {
+    "shoots": {
+     "2026-09-16": {
+      "state": "learned",
+      "keepers": 154,
+      "frames": 1157
+     }
+    }
+   },
+   "can_go_back": false,
+   "can_stop": false,
+   "can_use_anyway": true,
+   "check": {
+    "kind": "keepers",
+    "at": "2026-09-22T14:09:55",
+    "passed": false,
+    "sentence": "13 more of the photographs you kept would be shown less than are shown more.",
+    "shoots": [
+     {
+      "shoot": "2026-09-13-dog",
+      "keepers": 14,
+      "checked": 14,
+      "moved_down": 3,
+      "hidden": 0,
+      "lifted": 1,
+      "passed": false,
+      "why": "3 shown less against 1 shown more",
+      "frames": [
+       {
+        "shoot": "2026-09-13-dog",
+        "file": "TSC04319.ARW",
+        "stem": "TSC04319",
+        "burst": "1",
+        "scene": "3",
+        "now": "clear win",
+        "new": "maybe",
+        "tier_now": "clear win",
+        "tier_new": "maybe",
+        "down": true,
+        "why": "another frame of this burst ranks above it now"
+       }
+      ]
+     }
+    ],
+    "couldnt_check": []
+   }
+  },
+  {
+   "id": "edit",
+   "title": "Your starting edit",
+   "changes": "Where a new shoot's first sidecar starts. It never re-renders anything you have exported.",
+   "state": "in_use",
+   "sentence": "In use since 22 Sep. New shoots whose light measures like one of these start there.",
+   "live": {
+    "version": "2026-09-22T14-10-02",
+    "since": "2026-09-22",
+    "made": "2026-09-22T14:10:02",
+    "source": "526 finished frames on 2 shoots",
+    "data": {
+     "frames": 526,
+     "venues": 2,
+     "venue_labels": [
+      "a gym under mixed light",
+      "an evening in town"
+     ],
+     "carried": []
+    }
+   },
+   "candidate": null,
+   "training": {},
+   "can_go_back": true,
+   "can_stop": true,
+   "can_use_anyway": false,
+   "check": {
+    "kind": "edit",
+    "at": "2026-09-22T14:10:02",
+    "passed": true,
+    "keepers": 773,
+    "checked": 773,
+    "moved_down": 0,
+    "hidden": 0,
+    "lifted": 0,
+    "sentence": "It cannot change the cull, so no photograph you kept can move.",
+    "shoots": [],
+    "couldnt_check": []
+   }
+  }
+ ],
+ "fixed": [
+  {
+   "id": "picture-score",
+   "title": "Picture judgement",
+   "sentence": "Built in, not trained on your photographs."
+  },
+  {
+   "id": "face-checks",
+   "title": "Face checks",
+   "sentence": "Fixed rules, checked against 94 faces judged by eye."
+  }
+ ]
+}

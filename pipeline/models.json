@@ -1,0 +1,59 @@
+{
+ "note": "Every model the pipeline runs, pinned by SHA-256. A weight file is accepted only if it hashes to the value here. This exists because `[ -s file ]` was the only check: a 131-byte Git LFS pointer sat in models/ for days passing as the 227 KB face detector, and a mutable branch URL can change what you get without changing what you asked for. The licence column is also the source for the third-party notices the app has to carry.",
+ "models": [
+  {
+   "file": "yunet.onnx",
+   "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+   "bytes": 232589,
+   "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+   "what": "face detection, at three scales",
+   "licence": "MIT",
+   "attribution": "OpenCV Zoo, YuNet (2023mar)"
+  },
+  {
+   "file": "object_detection_yolox_2022nov.onnx",
+   "sha256": "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063",
+   "bytes": 35858002,
+   "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/object_detection_yolox/object_detection_yolox_2022nov.onnx",
+   "what": "person and animal boxes, for subject focus and preset placement",
+   "licence": "Apache-2.0",
+   "attribution": "OpenCV Zoo, YOLOX (2022nov)"
+  },
+  {
+   "file": "face_recognition_sface_2021dec.onnx",
+   "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+   "bytes": 38696353,
+   "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+   "what": "face identity embeddings, clustered so cull.csv says who is in each frame",
+   "licence": "Apache-2.0",
+   "attribution": "OpenCV Zoo, SFace (2021dec)",
+   "identity": true
+  },
+  {
+   "file": "aesthetic_vit_l14_linear.pth",
+   "sha256": "21dd590f3ccdc646f0d53120778b296013b096a035a2718c9cb0d511bff0f1e0",
+   "bytes": 3714759,
+   "url": "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth",
+   "what": "a linear head over CLIP embeddings, for light and composition",
+   "licence": "Apache-2.0",
+   "attribution": "christophschuhmann/improved-aesthetic-predictor (sac+logos+ava1-l14-linearMSE)",
+   "provenance_note": "Trained partly on AVA, a scrape of DPChallenge photographs carrying no licence grant of its own. The head itself is 3.7 MB and is the cheapest component here to replace with one whose provenance is wholly known."
+  },
+  {
+   "file": "face_landmarker.task",
+   "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+   "bytes": 3758596,
+   "url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+   "what": "478 landmarks and 52 blendshapes: blink, smile, jaw, squint, pucker, cheek, brow, eye look",
+   "licence": "Apache-2.0",
+   "attribution": "Google MediaPipe Face Landmarker (float16)",
+   "provenance_note": "The MediaPipe repository and PyPI wheel are Apache-2.0, but this .task bundle URL carries no licence notice of its own. The wheel ships equivalent weights if that ever needs to be airtight."
+  }
+ ],
+ "not_shipped": [
+  {
+   "file": "object_detection_nanodet_2022nov.onnx",
+   "why": "Downloaded by an early version and never referenced by any module. Nothing imports it; it is not in MODEL_FILES. Safe to delete."
+  }
+ ]
+}

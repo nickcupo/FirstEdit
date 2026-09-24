@@ -1,0 +1,73 @@
+# What can be checked without pictures: the Python compiles, lints and passes
+# its tests, the shell scripts parse, and the Mac app builds and passes its own
+# tests. The face and bench checks need fixtures that are not in the repo, and
+# the one test that reads a real library skips itself. See CONTRIBUTING.md.
+#
+# What is deliberately not here: app/build.sh. It downloads an interpreter and
+# five models, signs, and notarizes, and a release is a thing a person does on
+# purpose — RELEASING.md is the procedure. If that ever changes, the checkout
+# needs fetch-depth: 0 and its tags, or `git describe` quietly stamps the DMG
+# 0.1.0-<sha> and every installed copy stops seeing updates.
+name: check
+on: [push, pull_request]
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.12"}
+      - run: python -m compileall -q pipeline app tests
+      - run: pip install -q ruff && ruff check pipeline app tests
+      - run: sudo apt-get install -y -q zsh >/dev/null && for f in pl setup.sh app/build.sh pipeline/models.sh .githooks/*; do zsh -n "$f"; done
+      - run: for f in app/tools/*.sh; do bash -n "$f"; done
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: {python-version: "3.12"}
+      # What the tested code imports, at the versions requirements.txt pins:
+      # cv2 and numpy (taste.py and presets.py import them at the top) and
+      # Pillow (instagram.py and its tests). Nothing a test reaches needs torch,
+      # rawpy, mediapipe or huggingface_hub - where one is near, the code goes
+      # on without it - and no model weight is read. zsh and git are for the
+      # hooks' own tests.
+      - run: sudo apt-get install -y -q zsh >/dev/null
+      - run: pip install -q pytest $(grep -E '^(opencv-python-headless|numpy|pillow)==' requirements.txt)
+      # The learned state goes to a folder of its own, never the repository.
+      - run: python -m pytest -q tests -k 'not test_every_sidecar_on_this_machine_renders_for_every_editor'
+        env:
+          PIPELINE_LEARNED: ${{ runner.temp }}/learned
+  swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The app is macOS 15 code that uses a handful of macOS 26 APIs behind
+      # `#available`, so it needs an SDK of 26 or newer to compile at all. A
+      # runner image that has not caught up says so here rather than in forty
+      # lines of "cannot find glassEffect".
+      - run: |
+          sdk=$(xcrun --show-sdk-version)
+          echo "Xcode $(xcodebuild -version | head -1), macOS SDK $sdk"
+          [ "${sdk%%.*}" -ge 26 ] || { echo "this runner's SDK is $sdk; the app needs 26 or newer"; exit 1; }
+      - run: swift build --package-path app -c release --arch arm64
+      - run: swift test --package-path app
+      # The strings and the icon are compiled by app/build.sh, not by the
+      # package, so they are compiled here too: a catalog that has stopped
+      # compiling should fail a pull request and not a release.
+      - run: xcrun xcstringstool compile --language en --output-directory "$RUNNER_TEMP/strings" app/Resources/Localizable.xcstrings
+      # The icon is a layered .icon document written whole by make_icon.py,
+      # which needs nothing but the standard library. The actool that
+      # understands that format ships with Xcode 26, which the SDK check above
+      # has already insisted on.
+      - run: |
+          mkdir -p "$RUNNER_TEMP/assets"
+          python3 app/make_icon.py "$RUNNER_TEMP/AppIcon.icon"
+          xcrun actool "$RUNNER_TEMP/AppIcon.icon" --compile "$RUNNER_TEMP/assets" --platform macosx \
+            --minimum-deployment-target 15.0 --app-icon AppIcon --standalone-icon-behavior all \
+            --output-partial-info-plist "$RUNNER_TEMP/icon.plist" --output-format human-readable-text
+          [ -s "$RUNNER_TEMP/assets/Assets.car" ] && [ -s "$RUNNER_TEMP/assets/AppIcon.icns" ]
+      # The gates that need no interpreter and no bundle: the tree, the lock
+      # and the vocabulary. STAGE=check builds nothing and signs nothing.
+      - run: STAGE=check zsh app/build.sh

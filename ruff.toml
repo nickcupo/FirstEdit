@@ -1,0 +1,7 @@
+line-length = 160
+[lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501", "E741", "B007", "B905"]
+[lint.per-file-ignores]
+# cull.py sets environment variables that must be in place before the heavy imports.
+"pipeline/cull.py" = ["E402"]

@@ -1,0 +1,42 @@
+#!/bin/zsh
+# The vocabulary check from pre-commit, over the commit message. A word in a
+# message is as public as a word in a file, and pre-commit never sees one: four
+# messages on the branch this hook was written on carried the vocabulary while
+# every file in the tree was clean.
+#
+# Same list, same rules (see vocab.zsh). When photopipeline.vocabfile is not
+# set this says nothing, because pre-commit has already said the check is off.
+
+emulate -L zsh
+set -e
+source "${0:A:h}/vocab.zsh"
+
+msgfile="$1"
+vocab_load
+case $VOCAB_STATE in
+  unset) exit 0 ;;
+  broken)
+    echo "refusing the commit: $VOCAB_WHY"
+    exit 1 ;;
+esac
+
+# Everything above the scissors line `git commit -v` adds, comment lines
+# included. Whether git strips a # line depends on how the message arrived: it
+# does for one written in the editor, and keeps it for `git commit -m`, and a
+# hook cannot tell which. Scanning them costs, at worst, a refusal over a word
+# in the template git wrote; skipping them would let one into the history.
+msg=$(awk '/^# -+ >8 -+$/ {exit} {print}' "$msgfile")
+rc=0
+vocab_scan "$msg" || rc=$?
+if (( rc == 1 )); then
+  echo "refusing the commit: domain vocabulary in the commit message"
+  echo "$VOCAB_HITS" | head -12 | sed 's/^/    /'
+  echo "  This repo is public, and so is its history. Reword it."
+  echo "  The message is kept in $msgfile."
+  exit 1
+elif (( rc == 2 )); then
+  echo "refusing the commit: the vocabulary scan itself failed on the message"
+  echo "$VOCAB_HITS" | head -3 | sed 's/^/    /'
+  exit 1
+fi
+exit 0

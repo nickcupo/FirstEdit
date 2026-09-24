@@ -1,0 +1,26 @@
+{
+  "folder": "/scratch/support/learned",
+  "error": "",
+  "keepers": {"photos": 773, "shoots": 6, "at": "2026-09-22T14:10:00"},
+  "queued": false,
+  "due": false,
+  "new_to_learn_from": ["2026-09-21"],
+  "running": true,
+  "job": {"title": "Learning from 2026-09-21",
+          "label": "reading the edits you exported: 144 of 288 frames",
+          "stage": "exports",
+          "fraction": 0.53, "elapsed": 212, "id": 1,
+          "remaining": 188, "remaining_text": "about 3 minutes left",
+          "safe_to_stop": "Stopping it loses only the time it has spent."},
+  "headline": "It learns only from shoots you have finished. Nothing new is used until it has been checked against every photograph you kept.",
+  "learners": [
+    {"id": "edit", "title": "Your starting edit",
+     "changes": "The first preset of a new shoot. It never re-renders anything you exported.",
+     "state": "in_use",
+     "sentence": "In use since 2026-09-22. New shoots whose light measures like one of these start there.",
+     "live": {"version": "v1", "since": "2026-09-22", "source": "526 finished frames on 2 shoots"},
+     "candidate": null, "can_go_back": true, "can_stop": true, "can_use_anyway": false,
+     "check": null}
+  ],
+  "fixed": []
+}

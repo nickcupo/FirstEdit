@@ -1,0 +1,19 @@
+# Pinned to what the app is built and tested with (Python 3.12, macOS arm64).
+# Stage 1: focus and subject detection.
+opencv-python-headless==5.0.0.93
+pillow==12.3.0
+numpy==2.5.3
+# Stage 1.5: faces on real pixels. rawpy is libraw; mediapipe 1.x crashes headless on macOS.
+rawpy==0.27.1
+mediapipe==0.10.14
+# mediapipe asks for opencv-contrib-python, so a second cv2 goes in beside the
+# headless one above and whichever installed last is the cv2 that gets imported.
+# Pinned to the same version as the headless wheel, so that is at least the same
+# OpenCV either way, and so the notices name a version that was chosen.
+opencv-contrib-python==5.0.0.93
+# Stage 2: aesthetics, sameness, the scene reader.
+torch==2.14.0
+torchvision==0.29.0
+open_clip_torch==3.3.0
+huggingface_hub==1.31.0
+imagehash==4.3.2

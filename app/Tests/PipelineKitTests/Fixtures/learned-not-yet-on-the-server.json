@@ -1,0 +1,50 @@
+{
+  "headline": "It learns only from shoots you have finished. Nothing new is used until it has been checked against every photograph you kept.",
+  "keepers": 773,
+  "shoots": 6,
+  "last_checked": "2026-09-22T14:10:00",
+  "new_shoots": 2,
+  "running": false,
+  "learners": [
+    {
+      "id": "reasons",
+      "title": "Why you drop frames",
+      "learned_from": "44 reasons you gave on 1 finished shoot",
+      "plain_metric": "It recognises: face (24), framing (12). Five more needed for blur.",
+      "status": "not_in_use",
+      "detail": "Not in use. The new version would hide 10 of the photographs you kept on 2026-09-21.",
+      "check": {
+        "keepers": 773, "checked": 773, "hidden": 10, "moved_down": 0, "moved_up": 0,
+        "shoot": "2026-09-21",
+        "frames": [
+          {"shoot": "2026-09-21", "stem": "TSC07363", "now": "the cull puts it forward",
+           "candidate": "set aside", "why": "looks like 'face'"}
+        ]
+      },
+      "live_since": null,
+      "previous": "2026-09-19"
+    },
+    {
+      "id": "order",
+      "title": "Which frames of a burst you keep",
+      "learned_from": "the 154 photographs you kept on 1 finished shoot",
+      "plain_metric": "Picks your frame over another 61 times in 100 (a coin toss is 50).",
+      "status": "in_use",
+      "detail": "In use since 22 Sep.",
+      "check": null,
+      "live_since": "2026-09-22",
+      "previous": null
+    },
+    {
+      "id": "picture",
+      "title": "Picture judgement",
+      "learned_from": "built in, not trained on your photographs",
+      "plain_metric": "",
+      "status": "fixed",
+      "detail": "",
+      "check": null,
+      "live_since": null,
+      "previous": null
+    }
+  ]
+}

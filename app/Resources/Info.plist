@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>First Edit</string>
+  <key>CFBundleDisplayName</key><string>First Edit</string>
+  <key>CFBundleIdentifier</key><string>com.nickcupo.firstedit</string>
+  <key>CFBundleExecutable</key><string>First Edit</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <!-- Both keys name the asset catalog's icon set. actool writes the same two
+       into a partial plist when it compiles AppIcon.xcassets, and app/build.sh
+       fails if what it wrote and what is here disagree. -->
+  <key>CFBundleIconName</key><string>AppIcon</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__BUILD__</string>
+  <!-- public, or private for a build that carries the modules from the private repo. app/build.sh fills it in; the gates read it back off the bundle. -->
+  <key>PhotoPipelineBuild</key><string>__KIND__</string>
+  <!-- 15.0, and the Swift package says .macOS(.v15) as well: app/build.sh
+       reads this number back out of the binary it just built and refuses a
+       bundle that promises an older macOS than its own code was compiled for. -->
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.photography</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>MIT licence</string>
+  <!-- The engine is a child process on 127.0.0.1, reached over plain HTTP with
+       a key that lives only in this launch. -->
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+  <!-- A card reader is a removable volume, and macOS asks before an app reads
+       one. The sentence is what the prompt shows him. -->
+  <key>NSRemovableVolumesUsageDescription</key><string>First Edit reads photographs from your memory card.</string>
+  <!-- Neither kind of termination without asking. The app owns a Python child
+       and a queue of verdicts that have not been written yet; macOS killing it
+       quietly, or keeping it "running" while it is not, loses both. -->
+  <key>NSSupportsAutomaticTermination</key><false/>
+  <key>NSSupportsSuddenTermination</key><false/>
+</dict></plist>

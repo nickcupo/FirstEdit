@@ -1,0 +1,49 @@
+{
+    "queue": [],
+    "held": false,
+    "waiting": 0,
+    "listed": 4,
+    "fraction": 1.0,
+    "pass": 1,
+    "done": [
+        {
+            "id": 1,
+            "kind": "cull",
+            "title": "culling 2026-09-13-dog",
+            "shoot": "2026-09-13-dog",
+            "outcome": "done"
+        },
+        {
+            "id": 2,
+            "kind": "presets",
+            "title": "presets for 2026-09-13-dog",
+            "shoot": "2026-09-13-dog",
+            "outcome": "done"
+        },
+        {
+            "id": 3,
+            "kind": "gather",
+            "title": "gathering the keepers of 2026-09-13-dog",
+            "shoot": "2026-09-13-dog",
+            "outcome": "done"
+        },
+        {
+            "id": 4,
+            "kind": "stor-push",
+            "title": "copying the RAWs of 2026-09-13-dog to iCloud",
+            "shoot": "2026-09-13-dog",
+            "outcome": "done"
+        }
+    ],
+    "skipped": [],
+    "running": false,
+    "from_list": false,
+    "id": 4,
+    "kind": "stor-push",
+    "title": "copying the RAWs of 2026-09-13-dog to iCloud",
+    "shoot": "2026-09-13-dog",
+    "label": "copying to iCloud: 54 of 54 frames",
+    "remaining_text": "",
+    "job_fraction": 1.0,
+    "background": false
+}

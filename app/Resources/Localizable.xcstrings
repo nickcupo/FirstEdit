@@ -1,0 +1,1074 @@
+{
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "api.httpFailure": {
+      "comment": "A non-success status with no sentence in the body.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The engine refused that (%lld)."
+          }
+        }
+      }
+    },
+    "api.notUnderstood": {
+      "comment": "A decoding failure. The technical text goes behind Details.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The engine answered something this version does not understand."
+          }
+        }
+      }
+    },
+    "api.offline": {
+      "comment": "A request never left.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Edit could not reach its own engine."
+          }
+        }
+      }
+    },
+    "app.name": {
+      "comment": "The app's name, as a window title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Edit"
+          }
+        }
+      }
+    },
+    "app.updateAvailable": {
+      "comment": "The sidebar footer, only when there is one.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update to %@ available ›"
+          }
+        }
+      }
+    },
+    "engine.couldNotStart": {
+      "comment": "Shown with the last line of the log under it.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The bundled Python could not be started."
+          }
+        }
+      }
+    },
+    "engine.exited": {
+      "comment": "The child process ended on its own.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The engine stopped (exit %lld)."
+          }
+        }
+      }
+    },
+    "engine.noPort": {
+      "comment": "A failed start.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The engine started but never said which port it was on."
+          }
+        }
+      }
+    },
+    "engine.nothingLost": {
+      "comment": "Under the engine-down title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing you decided is lost."
+          }
+        }
+      }
+    },
+    "engine.restart": {
+      "comment": "Button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart the Engine"
+          }
+        }
+      }
+    },
+    "engine.restarted": {
+      "comment": "A quiet banner, not an alert.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The engine stopped and was restarted. Nothing you decided is lost."
+          }
+        }
+      }
+    },
+    "engine.showLog": {
+      "comment": "Button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the Log"
+          }
+        }
+      }
+    },
+    "engine.starting": {
+      "comment": "While the engine comes up.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starting…"
+          }
+        }
+      }
+    },
+    "engine.stopped": {
+      "comment": "Shown in place of the window's content when the child process is not running.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Edit's engine stopped. Nothing you decided is lost."
+          }
+        }
+      }
+    },
+    "engine.stoppedTitle": {
+      "comment": "The engine-down view's title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Edit's engine stopped"
+          }
+        }
+      }
+    },
+    "job.activity": {
+      "comment": "The window's title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activity"
+          }
+        }
+      }
+    },
+    "job.copyLog": {
+      "comment": "Button in the Activity window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy the Log"
+          }
+        }
+      }
+    },
+    "job.done": {
+      "comment": "An outcome.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        }
+      }
+    },
+    "job.elapsed": {
+      "comment": "A column in the Activity window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elapsed"
+          }
+        }
+      }
+    },
+    "job.failed": {
+      "comment": "An outcome.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed"
+          }
+        }
+      }
+    },
+    "job.noJobs": {
+      "comment": "The Activity window, empty.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing has run yet in this session."
+          }
+        }
+      }
+    },
+    "job.outcome": {
+      "comment": "A column in the Activity window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outcome"
+          }
+        }
+      }
+    },
+    "job.refused": {
+      "comment": "A first-class outcome, in the ordinary text colour.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refused"
+          }
+        }
+      }
+    },
+    "job.running": {
+      "comment": "An outcome.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running"
+          }
+        }
+      }
+    },
+    "job.shoot": {
+      "comment": "A column in the Activity window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shoot"
+          }
+        }
+      }
+    },
+    "job.showLogFile": {
+      "comment": "Button in the Activity window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the Log File in Finder"
+          }
+        }
+      }
+    },
+    "job.started": {
+      "comment": "A column in the Activity window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Started"
+          }
+        }
+      }
+    },
+    "job.stop": {
+      "comment": "Stops the running job.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
+          }
+        }
+      }
+    },
+    "job.stopped": {
+      "comment": "An outcome.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stopped"
+          }
+        }
+      }
+    },
+    "job.waiting": {
+      "comment": "A second job was asked for while one runs.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for what is running to finish"
+          }
+        }
+      }
+    },
+    "job.what": {
+      "comment": "A column in the Activity window.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Job"
+          }
+        }
+      }
+    },
+    "library.allShoots": {
+      "comment": "Sidebar row.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All Shoots"
+          }
+        }
+      }
+    },
+    "library.empty": {
+      "comment": "Nothing in the library.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No shoots yet"
+          }
+        }
+      }
+    },
+    "library.emptyWhy": {
+      "comment": "Under the empty-library title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Put a memory card in to copy your first shoot."
+          }
+        }
+      }
+    },
+    "library.finished": {
+      "comment": "Sidebar section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finished"
+          }
+        }
+      }
+    },
+    "library.frames": {
+      "comment": "A shoot row's subtitle.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld frames"
+          }
+        }
+      }
+    },
+    "library.framesAndKept": {
+      "comment": "A shoot row's subtitle. Keepers include explicit keeps and accepted cull picks.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld frames · %lld keepers"
+          }
+        }
+      }
+    },
+    "library.inProgress": {
+      "comment": "Sidebar section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Progress"
+          }
+        }
+      }
+    },
+    "library.kept": {
+      "comment": "Keepers include explicit keeps and accepted cull picks in reviewed bursts.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld keepers"
+          }
+        }
+      }
+    },
+    "library.learned": {
+      "comment": "Sidebar row.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What the Cull Has Learned"
+          }
+        }
+      }
+    },
+    "library.library": {
+      "comment": "Sidebar section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library"
+          }
+        }
+      }
+    },
+    "library.loading": {
+      "comment": "First load.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Looking for your shoots…"
+          }
+        }
+      }
+    },
+    "library.memoryCard": {
+      "comment": "Sidebar section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory Card"
+          }
+        }
+      }
+    },
+    "library.showTheFile": {
+      "comment": "On a broken shoot's row.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the File"
+          }
+        }
+      }
+    },
+    "library.storage": {
+      "comment": "Sidebar row.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage"
+          }
+        }
+      }
+    },
+    "overview.beenThrough": {
+      "comment": "Only leaving a burst forward records it as looked through. The one phrase for it, everywhere.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld looked through"
+          }
+        }
+      }
+    },
+    "overview.bursts": {
+      "comment": "A row label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bursts"
+          }
+        }
+      }
+    },
+    "overview.burstsOf": {
+      "comment": "The window subtitle on Choose Keepers.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld bursts"
+          }
+        }
+      }
+    },
+    "overview.cullPutForward": {
+      "comment": "The machine's shortlist, never his.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The cull put forward"
+          }
+        }
+      }
+    },
+    "overview.folder": {
+      "comment": "A row label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Folder"
+          }
+        }
+      }
+    },
+    "overview.frames": {
+      "comment": "A column and a row label.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frames"
+          }
+        }
+      }
+    },
+    "overview.shoot": {
+      "comment": "A column.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shoot"
+          }
+        }
+      }
+    },
+    "overview.where": {
+      "comment": "The engine's storage phrase.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Where it is"
+          }
+        }
+      }
+    },
+    "overview.youKept": {
+      "comment": "Explicit keeps and accepted cull picks.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keepers"
+          }
+        }
+      }
+    },
+    "overview.youPutOut": {
+      "comment": "Reviewed frames not kept, including cull decisions left unchanged.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not kept"
+          }
+        }
+      }
+    },
+    "quit.body": {
+      "comment": "Under the title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It stops where it is. Nothing you decided is lost, and it can be started again."
+          }
+        }
+      }
+    },
+    "quit.bodyCull": {
+      "comment": "Under the title.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The cull stops where it is. Nothing you decided is lost, and it can be started again."
+          }
+        }
+      }
+    },
+    "quit.keepWorking": {
+      "comment": "The default button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep Working"
+          }
+        }
+      }
+    },
+    "quit.quit": {
+      "comment": "The other button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit"
+          }
+        }
+      }
+    },
+    "quit.title": {
+      "comment": "⌘Q while a job runs.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Something is still running. Quit anyway?"
+          }
+        }
+      }
+    },
+    "quit.titleCull": {
+      "comment": "⌘Q while the cull runs.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A cull is running. Quit anyway?"
+          }
+        }
+      }
+    },
+    "shell.details": {
+      "comment": "The disclosure that holds the technical text of a refusal.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Details"
+          }
+        }
+      }
+    },
+    "shell.inspector": {
+      "comment": "Toolbar toggle.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspector"
+          }
+        }
+      }
+    },
+    "shell.nothingToShow": {
+      "comment": "An empty inspector.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing to show here yet."
+          }
+        }
+      }
+    },
+    "shell.sidebar": {
+      "comment": "Toolbar toggle.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sidebar"
+          }
+        }
+      }
+    },
+    "step.cull": {
+      "comment": "Step name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cull"
+          }
+        }
+      }
+    },
+    "step.done": {
+      "comment": "Step name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish"
+          }
+        }
+      }
+    },
+    "step.edit": {
+      "comment": "Step name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit in PhotoLab"
+          }
+        }
+      }
+    },
+    "step.ingest": {
+      "comment": "Step name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy the Card"
+          }
+        }
+      }
+    },
+    "step.instagram": {
+      "comment": "Step name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Instagram"
+          }
+        }
+      }
+    },
+    "step.keepers": {
+      "comment": "Step name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Keepers"
+          }
+        }
+      }
+    },
+    "step.notBuiltYet": {
+      "comment": "The foundation shell before a feature crew registers its step view.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This step is not built yet."
+          }
+        }
+      }
+    },
+    "step.notYet": {
+      "comment": "A step whose prerequisite is unmet.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This step is not ready yet."
+          }
+        }
+      }
+    },
+    "step.pickAShoot": {
+      "comment": "Nothing selected.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a shoot on the left."
+          }
+        }
+      }
+    },
+    "step.presets": {
+      "comment": "Step name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Presets"
+          }
+        }
+      }
+    },
+    "step.reels": {
+      "comment": "Step name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reels"
+          }
+        }
+      }
+    },
+    "verdict.drop": {
+      "comment": "The left-hand button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drop"
+          }
+        }
+      }
+    },
+    "verdict.dropHelp": {
+      "comment": "Help tag on the Drop button.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drop doesn't delete anything. It records that this frame is out."
+          }
+        }
+      }
+    },
+    "verdict.heldKey": {
+      "comment": "Shown once when a key repeat is ignored.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Holding a key marks one frame only. Press it again for the next."
+          }
+        }
+      }
+    },
+    "verdict.keep": {
+      "comment": "The right-hand button. Never abbreviated.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep"
+          }
+        }
+      }
+    },
+    "verdict.noPixels": {
+      "comment": "A frame with no picture at any size can take no verdict.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This frame's pixels are not on this Mac — its RAW is archived, or its rendering was taken back. Nothing can be decided here."
+          }
+        }
+      }
+    },
+    "verdict.notOnScreen": {
+      "comment": "A verdict is only ever taken on a frame that is actually displayed.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That frame isn't the one on screen."
+          }
+        }
+      }
+    },
+    "verdict.stillOpening": {
+      "comment": "Shown with a soft bump and a haptic.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Still opening this frame."
+          }
+        }
+      }
+    },
+    "verdict.undoClear": {
+      "comment": "An undo step's name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear the Mark on %@"
+          }
+        }
+      }
+    },
+    "verdict.undoDrop": {
+      "comment": "An undo step's name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drop %@"
+          }
+        }
+      }
+    },
+    "verdict.undoFinishBurst": {
+      "comment": "An undo step's name: N, or an arrow past the burst's last frame.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaving Burst %lld"
+          }
+        }
+      }
+    },
+    "verdict.undoKeep": {
+      "comment": "Names the step in the Edit menu, after the word Undo.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep %@"
+          }
+        }
+      }
+    },
+    "verdict.undoKeepOnly": {
+      "comment": "An undo step's name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep Only %@"
+          }
+        }
+      }
+    },
+    "verdict.undoReason": {
+      "comment": "An undo step's name.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reason '%@' on %@"
+          }
+        }
+      }
+    }
+  }
+}
