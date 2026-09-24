@@ -651,7 +651,7 @@ rm -f "$DMG"
 # It is installed beside the bundle's interpreter, not into it: build/python is
 # what gets copied into the app, and a DMG tool has no business inside one.
 [ -d build/tools/dmgbuild ] || "$BPY" -m pip install -q --target build/tools dmgbuild
-PYTHONPATH=build/tools "$BPY" -m dmgbuild -s app/dmg_settings.py -D app="$APP" "First Edit" "$DMG" | grep -v "^$" || true
+PYTHONPATH=build/tools "$BPY" -m dmgbuild -s app/dmg_settings.py -D app="$APP" "FirstEdit" "$DMG" | grep -v "^$" || true
 [ -s "$DMG" ] || { echo "dmgbuild produced nothing"; exit 1; }
 [ -n "$IDENTITY" ] && codesign --force --timestamp --sign "$IDENTITY" "$DMG"
 # The notices that describe this DMG, beside it: they go up to the release as an asset of their own.

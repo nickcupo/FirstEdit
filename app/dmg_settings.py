@@ -1,5 +1,5 @@
 # dmgbuild settings: the app on the left, Applications on the right, the arrow between them.
-#   dmgbuild -s app/dmg_settings.py -D app="build/First Edit.app" "First Edit" dist/First-Edit-X.dmg
+#   dmgbuild -s app/dmg_settings.py -D app="build/First Edit.app" "FirstEdit" dist/First-Edit-X.dmg
 import os
 
 app = defines.get("app", "build/First Edit.app")  # noqa: F821 (dmgbuild injects `defines`)
