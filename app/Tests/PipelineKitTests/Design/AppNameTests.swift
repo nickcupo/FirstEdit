@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import PipelineKit
 
-/// The app is First Edit everywhere he reads its name: the menu bar, the
+/// The app is FirstEdit everywhere he reads its name: the menu bar, the
 /// window, the About panel, the Dock, the card-reader prompt, the help menu,
 /// every sentence that names it, and the report he files.
 ///
@@ -22,11 +22,11 @@ struct AppNameTests {
         return try #require(plist as? [String: Any])
     }
 
-    @Test("the bundle names the app First Edit: menu bar, Dock, executable, identifier and the card-reader prompt")
+    @Test("the bundle displays FirstEdit and preserves its executable and identifier")
     func bundle() throws {
         let info = try Self.infoPlist()
-        #expect(info["CFBundleName"] as? String == "First Edit")
-        #expect(info["CFBundleDisplayName"] as? String == "First Edit")
+        #expect(info["CFBundleName"] as? String == "FirstEdit")
+        #expect(info["CFBundleDisplayName"] as? String == "FirstEdit")
         // app/build.sh copies the binary to Contents/MacOS/$EXE, and macOS
         // opens whatever this key names: the two have to agree.
         #expect(info["CFBundleExecutable"] as? String == "First Edit")
@@ -35,7 +35,7 @@ struct AppNameTests {
         #expect(info["CFBundleIdentifier"] as? String == "com.nickcupo.firstedit")
         #expect(info["CFBundleIdentifier"] as? String == FirstLaunch.New.bundleID)
         let prompt = try #require(info["NSRemovableVolumesUsageDescription"] as? String)
-        #expect(prompt.hasPrefix("First Edit "))
+        #expect(prompt.hasPrefix("FirstEdit "))
     }
 
     @Test("no sentence in the catalog says the old name")
@@ -43,7 +43,7 @@ struct AppNameTests {
         for (key, value) in try StringCatalogTests.catalog() {
             #expect(!value.contains(Self.old), "\(key) still says \"\(value)\"")
         }
-        #expect(Strings.App.name == "First Edit")
+        #expect(Strings.App.name == "FirstEdit")
     }
 
     @Test("no Swift source says the old name, except where it finds the old app's things")
@@ -68,13 +68,13 @@ struct AppNameTests {
     /// the alert that names it while it is still open.
     static let allowed: Set<String> = ["FirstLaunch.swift", "FirstLaunchStrings.swift"]
 
-    @Test("a report goes to First Edit's own issues, and says which app it is about")
+    @Test("a report goes to FirstEdit's own issues, and says which app it is about")
     func report() throws {
         let url = try #require(HelpBook.reportURL(version: "0.2.0"))
         let c = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
         #expect(c.host == "github.com")
         #expect(c.path == "/nickcupo/first-edit/issues/new")
         let body = c.queryItems?.first { $0.name == "body" }?.value ?? ""
-        #expect(body.contains("First Edit 0.2.0"))
+        #expect(body.contains("FirstEdit 0.2.0"))
     }
 }

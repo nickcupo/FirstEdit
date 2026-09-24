@@ -24,7 +24,7 @@ public enum Strings {
     }
 
     public enum App {
-        public static var name: String { s("app.name", "First Edit", "The app's name, as a window title.") }
+        public static var name: String { s("app.name", "FirstEdit", "The app's name, as a window title.") }
         public static func updateAvailable(_ version: String) -> String {
             String(localized: "app.updateAvailable", defaultValue: "Update to \(version) available ›",
                    comment: "The sidebar footer, only when there is one.")
@@ -33,13 +33,13 @@ public enum Strings {
 
     public enum Engine {
         public static var stoppedTitle: String {
-            s("engine.stoppedTitle", "First Edit's engine stopped", "The engine-down view's title.")
+            s("engine.stoppedTitle", "FirstEdit's engine stopped", "The engine-down view's title.")
         }
         public static var nothingLost: String {
             s("engine.nothingLost", "Nothing you decided is lost.", "Under the engine-down title.")
         }
         public static var stopped: String {
-            s("engine.stopped", "First Edit's engine stopped. Nothing you decided is lost.",
+            s("engine.stopped", "FirstEdit's engine stopped. Nothing you decided is lost.",
               "Shown in place of the window's content when the child process is not running.")
         }
         public static var restarted: String {
@@ -64,7 +64,7 @@ public enum Strings {
 
     public enum API {
         public static var offline: String {
-            s("api.offline", "First Edit could not reach its own engine.", "A request never left.")
+            s("api.offline", "FirstEdit could not reach its own engine.", "A request never left.")
         }
         public static var notUnderstood: String {
             s("api.notUnderstood", "The engine answered something this version does not understand.",

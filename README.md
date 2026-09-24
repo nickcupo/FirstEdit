@@ -1,4 +1,4 @@
-# First Edit
+# FirstEdit
 
 A card of RAW files in, a folder of keepers with a starting edit out, on a
 Mac, without looking at every frame. Every face is judged on the
@@ -12,7 +12,7 @@ leaves short; and, for a venue I have exported finished frames from, the look
 I gave that venue. Anywhere else it starts from DxO's own camera-body
 rendering and invents nothing.
 
-The Mac workflow keeps noise reduction in DxO PhotoLab/DeepPRIME. First Edit
+The Mac workflow keeps noise reduction in DxO PhotoLab/DeepPRIME. FirstEdit
 writes PhotoLab sidecar adjustments and does not add custom denoising before
 PhotoLab.
 
@@ -30,9 +30,9 @@ since it shipped has yet passed the check that would let it be used.
 
 ## Install
 
-Download the First Edit `.dmg` from the
+Download the FirstEdit `.dmg` from the
 [GitHub releases page](https://github.com/nickcupo/first-edit/releases),
-then drag First Edit into Applications. OpenCV is included inside the app;
+then drag FirstEdit into Applications. OpenCV is included inside the app;
 the separate wheel files are only for building from source. The app requires an Apple silicon Mac running
 macOS 15 or newer. Release notes state whether the installer is notarized.
 
@@ -145,7 +145,7 @@ where it came from, including the things I measured and did not ship.
 
 ## The app
 
-**First Edit.app** is the whole thing in one window: put the card in,
+**FirstEdit** (installed as `First Edit.app`) is the whole thing in one window: put the card in,
 name the shoot, and it walks the steps — copy the card, cull, choose
 keepers, presets, edit in PhotoLab, Instagram, finish (and reels, between
 Instagram and finish, in a build that carries a reel maker; the public one
@@ -171,15 +171,11 @@ out, `X` to clear, the space bar to open the cut and adjust it, `Q` to undo
 `<shoot>/instagram`: a crop and a resize of the export, with no sharpening
 and no tone added.
 
-**There is no DMG to download yet.** As this is written the repository is
-private, and no build of First Edit has been published, so building the app
-(below) is the only way to run it. v0.1.3 is a tag with no release behind
-it, and the app has been rewritten as a native one since that tag was cut.
-The app does ask this repository's releases page for a newer version at
-launch (Check for Updates asks again), and an update it offers has to be
-signed and notarized by the same Apple Team ID as the copy asking for it
-before it is installed — but until something is published there, it finds
-nothing.
+Installers are available on the [releases page](https://github.com/nickcupo/first-edit/releases).
+The app checks that page for updates and verifies the signing identity before
+installing one. The next display-branding update uses **FirstEdit**; the installed
+bundle remains `First Edit.app` so existing installation and update paths keep
+working. No support folder, saved setting or library is moved by this spelling change.
 
 Apple silicon, macOS 15 or newer: `app/Package.swift` builds for
 `.macOS(.v15)` and `app/Resources/Info.plist` promises 15.0. On first launch
@@ -196,38 +192,38 @@ chosen in Settings, and every step says which files it wrote and where.
 
 ### Coming from Photo Pipeline
 
-First Edit is the same app under a new name. Before its first launch, make
+FirstEdit is the same app under a new name. Before its first launch, make
 a Time Machine backup, and keep `Photo Pipeline.app` somewhere other than
 `/Applications` rather than in the Trash: it is how the move is undone.
 
-The first time First Edit opens on a Mac that had Photo Pipeline, it renames
+The first time FirstEdit opens on a Mac that had Photo Pipeline, it renames
 `~/Library/Application Support/Photo Pipeline` to `First Edit` in place, so
 the 1.7 GB of models and everything learned move without a byte being
 copied, and in the same step leaves a link under the old name, so anything
 using that path, even at that instant, finds the same folder. It copies
 Photo Pipeline's settings across once and never changes the old ones.
 `MIGRATED.json` in the folder says what moved and how to put it back: quit
-First Edit, delete the link, rename the folder back, and open Photo
+FirstEdit, delete the link, rename the folder back, and open Photo
 Pipeline, whose settings were never touched. Two things an undo does not
 put back: settings changed in Photo Pipeline after the move are not copied
-again if First Edit is opened later, and sidecars First Edit wrote say
+again if FirstEdit is opened later, and sidecars FirstEdit wrote say
 `first-edit sidecar`, which Photo Pipeline does not know as its own, so it
 leaves them as they are. A run from a checkout with no `PIPELINE_SUPPORT` looks for
 `First Edit` first and `Photo Pipeline` second, so the app and a checkout go
 on sharing one folder on either side of the move.
 
 It moves nothing while Photo Pipeline is still open, and says so; if Photo
-Pipeline is opened while First Edit runs, First Edit says that too and
+Pipeline is opened while FirstEdit runs, FirstEdit says that too and
 offers to quit it, because the two share one folder. If both folders are
-already there it uses First Edit's, says where the other one is in Settings
-▸ Advanced, and merges and deletes nothing; when First Edit's has no models
+already there it uses FirstEdit's, says where the other one is in Settings
+▸ Advanced, and merges and deletes nothing; when FirstEdit's has no models
 or nothing learned and the other has, it also says so once, in an alert, with
 how to use the other one instead. Shoots stay where they are, and archived
 RAWs stay in iCloud Drive under `Photo Pipeline Archive`, which keeps its
 name. macOS asks once more for the card and for notifications, because it
 keeps those answers per app.
 
-Photo Pipeline's Check for Updates cannot install First Edit, because the
+Photo Pipeline's Check for Updates cannot install FirstEdit, because the
 bundle identifier changed; the first copy is installed by hand, and
 [RELEASING.md](RELEASING.md) ("Once: from Photo Pipeline to First Edit") has
 the order. The engine keeps its own names through the rename — `pipeline/`,

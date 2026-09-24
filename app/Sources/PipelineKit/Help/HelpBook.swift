@@ -16,7 +16,7 @@ public enum HelpBook {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleHelpBookName") != nil
     }
 
-    /// Help ▸ First Edit Help, which is only in the menu when a help book
+    /// Help ▸ FirstEdit Help, which is only in the menu when a help book
     /// ships (§2.12). Without one it opened Keyboard Shortcuts, the item
     /// below it, so the menu had two names for one window.
     public static func show() {
@@ -51,7 +51,7 @@ public enum HelpBook {
 
 
                 ---
-                First Edit \(version) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+                FirstEdit \(version) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
                 """),
         ]
         return c.url

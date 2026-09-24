@@ -146,12 +146,12 @@ struct FirstLaunchTests {
         #expect(s.newValues.isEmpty)
     }
 
-    @Test("the alert names the old app, says nothing has moved, and its one button quits First Edit")
+    @Test("the alert names the old app, says nothing has moved, and its one button quits FirstEdit")
     @MainActor func alert() {
         let a = FirstLaunch.stillOpenAlert()
         #expect(a.messageText == "Photo Pipeline is still open.")
-        #expect(a.informativeText == "Quit it, then open First Edit again. Nothing has been moved.")
-        #expect(a.buttons.map(\.title) == ["Quit First Edit"])
+        #expect(a.informativeText == "Quit it, then open FirstEdit again. Nothing has been moved.")
+        #expect(a.buttons.map(\.title) == ["Quit FirstEdit"])
     }
 
     // MARK: - the folder, row by row of the plan's table
@@ -395,7 +395,7 @@ struct FirstLaunchTests {
     @Test("moved with no link left at the old name: Settings says a tool naming the old folder will not find it")
     func noLinkSaysSo() {
         let out = SupportMove.Outcome.moved(linked: false, notFound: [], record: "MIGRATED.json")
-        #expect(out.note == "Photo Pipeline's folder is now First Edit's, but there is no link to it under the old "
+        #expect(out.note == "Photo Pipeline's folder is now FirstEdit's, but there is no link to it under the old "
                 + "name, so a tool that still names that folder will not find it. MIGRATED.json in the support "
                 + "folder says how to put it back.")
         #expect(SupportMove.Outcome.moved(linked: true, notFound: [], record: "MIGRATED.json").note == nil)

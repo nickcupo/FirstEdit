@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>First Edit</string>
-  <key>CFBundleDisplayName</key><string>First Edit</string>
+  <key>CFBundleName</key><string>FirstEdit</string>
+  <key>CFBundleDisplayName</key><string>FirstEdit</string>
   <key>CFBundleIdentifier</key><string>com.nickcupo.firstedit</string>
+  <!-- Keep the installed bundle/executable names for updater compatibility. -->
   <key>CFBundleExecutable</key><string>First Edit</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <!-- Both keys name the asset catalog's icon set. actool writes the same two
@@ -27,7 +28,7 @@
   <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <!-- A card reader is a removable volume, and macOS asks before an app reads
        one. The sentence is what the prompt shows him. -->
-  <key>NSRemovableVolumesUsageDescription</key><string>First Edit reads photographs from your memory card.</string>
+  <key>NSRemovableVolumesUsageDescription</key><string>FirstEdit reads photographs from your memory card.</string>
   <!-- Neither kind of termination without asking. The app owns a Python child
        and a queue of verdicts that have not been written yet; macOS killing it
        quietly, or keeping it "running" while it is not, loses both. -->

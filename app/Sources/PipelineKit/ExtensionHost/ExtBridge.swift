@@ -85,7 +85,7 @@ public final class ExtBridge: NSObject, WKScriptMessageHandlerWithReply {
       function send(call, payload) {
         var w = window.webkit && window.webkit.messageHandlers;
         var h = w && w["\(name)"];
-        if (!h) { return Promise.reject(new Error("this page is not running inside First Edit")); }
+        if (!h) { return Promise.reject(new Error("this page is not running inside FirstEdit")); }
         return h.postMessage({ name: call, payload: payload || {} });
       }
       var state = {

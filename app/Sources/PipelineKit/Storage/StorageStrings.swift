@@ -167,7 +167,7 @@ extension Strings {
         }
         public static var neverDeletesFolder: String {
             s("storage.neverDeletesFolder",
-              "First Edit never deletes a shoot's folder. Finder does that.",
+              "FirstEdit never deletes a shoot's folder. Finder does that.",
               "Under the group, so the limit is stated rather than discovered.")
         }
 

@@ -26,19 +26,19 @@ public enum Words {
         public static var help: String { s("menu.help", "Help", "Menu bar title.") }
     }
 
-    // MARK: First Edit
+    // MARK: FirstEdit
 
     public enum App {
-        public static var about: String { s("command.about", "About First Edit", "Menu item.") }
+        public static var about: String { s("command.about", "About FirstEdit", "Menu item.") }
         public static var checkForUpdates: String {
             s("command.checkForUpdates", "Check for Updates…", "Menu item.")
         }
         public static var settings: String { s("command.settings", "Settings…", "Menu item, ⌘,.") }
         public static var services: String { s("command.services", "Services", "The system submenu.") }
-        public static var hide: String { s("command.hide", "Hide First Edit", "Menu item.") }
+        public static var hide: String { s("command.hide", "Hide FirstEdit", "Menu item.") }
         public static var hideOthers: String { s("command.hideOthers", "Hide Others", "Menu item.") }
         public static var showAll: String { s("command.showAll", "Show All", "Menu item.") }
-        public static var quit: String { s("command.quit", "Quit First Edit", "Menu item.") }
+        public static var quit: String { s("command.quit", "Quit FirstEdit", "Menu item.") }
     }
 
     // MARK: File
@@ -268,7 +268,7 @@ public enum Words {
     // MARK: Help
 
     public enum Help {
-        public static var appHelp: String { s("command.appHelp", "First Edit Help", "Menu item.") }
+        public static var appHelp: String { s("command.appHelp", "FirstEdit Help", "Menu item.") }
         public static var shortcuts: String {
             s("command.shortcuts", "Keyboard Shortcuts", "Menu item, ⌘/. Opens a real window, not a sheet.")
         }

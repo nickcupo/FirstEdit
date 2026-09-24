@@ -69,7 +69,7 @@ extension Strings.Engine {
 
     public static var missingPart: String {
         e("engine.missingPart",
-          "Part of First Edit is missing. Install it again from the disk image — your photographs and decisions are untouched.",
+          "Part of FirstEdit is missing. Install it again from the disk image — your photographs and decisions are untouched.",
           "Under the engine-down title, when the bundled Python or one of its parts is not there. Restarting cannot fix it.")
     }
     public static var stoppedOnAnError: String {

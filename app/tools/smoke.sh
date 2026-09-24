@@ -2,7 +2,7 @@
 # Build the app, run it against a scratch library, and check the whole path
 # end to end (DESIGN.md §4.4).
 #
-#   tools/smoke.sh --library /path/to/scratch/lib [--app path/to/FirstEdit] [--expect N] [--deep]
+#   tools/smoke.sh --library /path/to/scratch/lib [--app path/to/FirstEdit] [--expect N] [--deep] [--offscreen]
 #
 # 1. `FirstEdit --check`: the engine starts with a per-launch key and
 #    answers an authenticated GET /api/shoots. With --deep it goes through
@@ -17,13 +17,16 @@
 #    builds over three weeks and their cull.csv files do not carry the same
 #    columns. Checking the newest and calling it a pass is how a light table
 #    that drew no photograph in any shoot went out.
-# 2. `FirstEdit --smoke`: the real app opens its window, the engine reaches
-#    running, the sidebar is read back out of the window's accessibility tree
-#    and must list every shoot, and the app quits.
+# 2. `FirstEdit --smoke-offscreen`: the real RootView is hosted beyond every
+#    screen in a non-key/non-main window; the app has no Dock presence. The
+#    engine reaches running, real sidebar rows are counted, each shoot must
+#    change the real window title through navigation, and the app quits.
 # 3. The engine's Python child is gone afterwards.
 #
 # It never runs against ~/photos, and it points every other folder the engine
-# writes to at scratch folders beside the library.
+# writes to at fresh temporary folders. Only local temporary library clones
+# with no symbolic/hard links or dataless files are accepted. No live defaults,
+# migrations, display restoration or notification setup is used.
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -39,15 +42,17 @@ while [[ $# -gt 0 ]]; do
     --app) binary="$2"; shift 2 ;;
     --expect) expect="$2"; shift 2 ;;
     --deep) deep="--deep"; shift ;;
+    --offscreen) shift ;;  # explicit spelling; all runs are offscreen
     -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 library=${library:-${PHOTOS_ROOT:-}}
 [[ -n "$library" ]] || { echo "smoke: --library is required, and it must be a scratch clone." >&2; exit 2; }
-library=$(cd "$library" && pwd)
+library=$(cd "$library" && pwd -P)
 case "$library" in
-  "$HOME"/photos|"$HOME"/photos/*) echo "smoke: refusing to run against $HOME/photos." >&2; exit 2 ;;
+  /private/tmp/*) ;;
+  *) echo "smoke: use a local scratch library clone under /private/tmp." >&2; exit 2 ;;
 esac
 [[ -d "$library/shoots" ]] || { echo "smoke: no shoots folder in $library" >&2; exit 2; }
 # The engine's own rule for what a shoot is (pipeline/library.py is_shoot): a
@@ -69,17 +74,29 @@ if [[ -z "$expect" ]]; then
   done
 fi
 
-scratch=$(dirname "$library")
+# Discard inherited engine overrides; this must measure the supplied bundle
+# and fresh scratch state, never a checkout/extension or a live support folder.
+for variable in ${!PIPELINE_@}; do unset "$variable"; done
+unset PYTHONHOME PYTHONPATH
+scratch=$(mktemp -d /private/tmp/first-edit-smoke.XXXXXX)
+export PIPELINE_SMOKE_ROOT="$scratch"
 export PHOTOS_ROOT="$library"
-export PIPELINE_SUPPORT=${PIPELINE_SUPPORT:-$scratch/support}
-export PIPELINE_ICLOUD=${PIPELINE_ICLOUD:-$scratch/icloud}
-export PIPELINE_LEARNED=${PIPELINE_LEARNED:-$scratch/learned}
-export PIPELINE_EXT=${PIPELINE_EXT:-$scratch/no-extension}
-mkdir -p "$PIPELINE_SUPPORT" "$PIPELINE_ICLOUD" "$PIPELINE_LEARNED" "$PIPELINE_EXT"
-# The one folder that is deliberately not created: a run that would publish
-# anything has nowhere to publish it to.
-export PIPELINE_SITE=${PIPELINE_SITE:-$scratch/no-site}
-[[ -e "$PIPELINE_SITE" ]] && { echo "smoke: $PIPELINE_SITE exists; name a folder that does not." >&2; exit 2; }
+export PIPELINE_SUPPORT="$scratch/support"
+export PIPELINE_ICLOUD="$scratch/icloud"
+export PIPELINE_LEARNED="$scratch/learned"
+export PIPELINE_EXT="$scratch/no-extension"
+export PIPELINE_SITE="$scratch/no-site"
+export CFFIXED_USER_HOME="$scratch/home"
+export XDG_CACHE_HOME="$scratch/cache"
+export TMPDIR="$scratch/tmp/"
+export HF_HOME="$scratch/cache/huggingface"
+export TORCH_HOME="$scratch/cache/torch"
+export MPLCONFIGDIR="$scratch/cache/matplotlib"
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
+mkdir -p "$PIPELINE_SUPPORT" "$PIPELINE_ICLOUD" "$PIPELINE_LEARNED" "$PIPELINE_EXT" \
+  "$CFFIXED_USER_HOME" "$XDG_CACHE_HOME" "$TMPDIR"
+echo "== isolated state: $scratch"
 
 if [[ -z "$binary" ]]; then
   echo "== build"
@@ -88,11 +105,18 @@ if [[ -z "$binary" ]]; then
 fi
 [[ -x "$binary" ]] || { echo "smoke: no app at $binary" >&2; exit 1; }
 
+# An older executable treats unknown flags as normal GUI startup. Refuse it
+# without launching it, then also require the new process's isolation receipt.
+LC_ALL=C grep -aFq 'SMOKE_OFFSCREEN_V1' "$binary" || {
+  echo "smoke: this binary has no offscreen entry point; rebuild it first." >&2; exit 2;
+}
+
 fail() { echo "SMOKE FAILED: $*"; [[ -f "$PIPELINE_SUPPORT/studio.log" ]] && tail -12 "$PIPELINE_SUPPORT/studio.log"; exit 1; }
 
 echo "== headless check against $library${deep:+ (deep)}"
-check=$("$binary" --check $deep 2>/dev/null) || { echo "$check"; fail "--check $deep exited non-zero"; }
+check=$("$binary" --check --smoke-offscreen $deep 2>/dev/null) || { echo "$check"; fail "--check $deep exited non-zero"; }
 echo "$check" | sed 's/^/   /'
+echo "$check" | grep -qx 'SMOKE_OFFSCREEN_V1 isolated' || fail "--check did not confirm isolation"
 echo "$check" | grep -q "^OK $expect shoots$" || fail "--check did not list $expect shoots"
 if [[ -n "$deep" ]]; then
   # One line per culled shoot, and a photograph decoded through the app's own
@@ -109,11 +133,12 @@ if [[ -n "$deep" ]]; then
   done
 fi
 cpid=$(echo "$check" | sed -n 's/^engine pid \([0-9]*\)$/\1/p')
-if [[ -n "$cpid" ]] && kill -0 "$cpid" 2>/dev/null; then fail "the --check engine (pid $cpid) is still running"; fi
+[[ "$cpid" =~ ^[1-9][0-9]*$ ]] || fail "--check did not report its real engine PID"
+if kill -0 "$cpid" 2>/dev/null; then fail "the --check engine (pid $cpid) is still running"; fi
 
-echo "== the app"
+echo "== the real app shell, offscreen"
 out=$(mktemp -t smoke)
-"$binary" --smoke >"$out" 2>/dev/null &
+"$binary" --smoke-offscreen >"$out" 2>/dev/null &
 apppid=$!
 for _ in $(seq 1200); do kill -0 "$apppid" 2>/dev/null || break; sleep 0.1; done
 if kill -0 "$apppid" 2>/dev/null; then
@@ -125,8 +150,14 @@ status=0; wait "$apppid" || status=$?
 sed 's/^/   /' "$out"
 [[ $status -eq 0 ]] || fail "the app exited $status"
 
+grep -qx 'SMOKE_OFFSCREEN_V1 isolated' "$out" || fail "the app did not confirm isolation"
+grep -qx 'SMOKE_OFFSCREEN_V1 verified' "$out" || fail "the app did not complete the offscreen checks"
+grep -q '^FAIL ' "$out" && fail "the app reported a failed check"
 grep -q '^ENGINE running on http://127.0.0.1:' "$out" || fail "the engine never reached running"
 epid=$(sed -n 's/^ENGINE running on .* pid \([0-9]*\)$/\1/p' "$out")
+[[ "$epid" =~ ^[1-9][0-9]*$ ]] || fail "the app did not report its real engine PID"
+drawn=$(sed -n 's/^SIDEBAR \([0-9]*\) rows drawn$/\1/p' "$out")
+[[ "$drawn" =~ ^[0-9]+$ ]] && (( drawn > 0 && drawn >= expect )) || fail "sidebar rows were not drawn"
 shown=$(sed -n 's/^SIDEBAR \([0-9]*\) shoots:.*$/\1/p' "$out")
 [[ "$shown" == "$expect" ]] || fail "the sidebar showed ${shown:-no} shoots, expected $expect"
 for d in "$library"/shoots/*/; do
@@ -138,7 +169,7 @@ grep -q '^ENGINE stopped$' "$out" || fail "the app did not stop its engine on th
 
 echo "== nothing left running"
 if [[ -n "$epid" ]] && [[ "$epid" != "0" ]]; then
-  if pgrep -f studio.py | grep -qx "$epid"; then fail "the engine (pid $epid) outlived the app"; fi
+  if kill -0 "$epid" 2>/dev/null; then fail "the engine (pid $epid) outlived the app"; fi
   echo "   engine pid $epid: gone"
 fi
 if pgrep -P "$apppid" >/dev/null 2>&1; then fail "the app left children behind"; fi

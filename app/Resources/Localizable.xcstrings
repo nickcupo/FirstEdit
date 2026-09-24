@@ -33,7 +33,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "First Edit could not reach its own engine."
+            "value": "FirstEdit could not reach its own engine."
           }
         }
       }
@@ -45,7 +45,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "First Edit"
+            "value": "FirstEdit"
           }
         }
       }
@@ -165,7 +165,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "First Edit's engine stopped. Nothing you decided is lost."
+            "value": "FirstEdit's engine stopped. Nothing you decided is lost."
           }
         }
       }
@@ -177,7 +177,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "First Edit's engine stopped"
+            "value": "FirstEdit's engine stopped"
           }
         }
       }

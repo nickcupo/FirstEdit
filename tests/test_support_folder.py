@@ -221,13 +221,15 @@ def test_the_app_and_the_engine_name_the_same_folders_and_identifier():
 
 def test_the_app_the_updater_and_the_build_name_the_same_app_and_repository():
     """Report an Issue, the update check and the two OpenCV wheels all go to
-    one repository, and the bundle's name is the one the engine calls itself."""
+    one repository. Display branding is independent of the installed executable
+    and support-folder name, which must remain compatible."""
     import plistlib
     import update
     app = PIPELINE.parent / "app"
     with (app / "Resources/Info.plist").open("rb") as fh:
         info = plistlib.load(fh)
-    assert info["CFBundleName"] == info["CFBundleDisplayName"] == info["CFBundleExecutable"] == common.APP_NAME
+    assert info["CFBundleName"] == info["CFBundleDisplayName"] == "FirstEdit"
+    assert info["CFBundleExecutable"] == common.APP_NAME == "First Edit"
     assert f'"/{update.REPO}/issues/new"' in (app / "Sources/PipelineKit/Help/HelpBook.swift").read_text()
     wheels = [ln for ln in (app / "requirements.lock").read_text().splitlines() if "releases/download" in ln]
     assert len(wheels) == 2 and all(f"https://github.com/{update.REPO}/releases/download/" in ln for ln in wheels)

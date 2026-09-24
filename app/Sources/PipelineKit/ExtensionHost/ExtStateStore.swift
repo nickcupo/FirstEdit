@@ -20,7 +20,7 @@ public final class ExtStateStore: @unchecked Sendable {
     /// One key, so everything a page kept can be found and let go together.
     public static let prefix = "extension.state."
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = AppDefaults.current) {
         self.defaults = defaults
     }
 

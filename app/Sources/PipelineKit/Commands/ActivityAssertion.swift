@@ -8,7 +8,7 @@ import Foundation
 // so this object owns exactly one and gives it up in `deinit` as well.
 
 public final class ActivityAssertion: @unchecked Sendable {
-    public static let reason = "First Edit job running"
+    public static let reason = "FirstEdit job running"
 
     private let lock = NSLock()
     private var token: NSObjectProtocol?

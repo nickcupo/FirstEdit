@@ -21,15 +21,15 @@ extension Strings {
                    comment: "A request outside the origin the page was served from.")
         }
         public static var wentOutside: String {
-            String(localized: "extension.wentOutside", defaultValue: "This page tried to open something outside First Edit. Nothing was opened.",
+            String(localized: "extension.wentOutside", defaultValue: "This page tried to open something outside FirstEdit. Nothing was opened.",
                    comment: "A navigation off the local origin, refused.")
         }
         public static var notRunning: String {
-            String(localized: "extension.notRunning", defaultValue: "This page is not running inside First Edit.",
+            String(localized: "extension.notRunning", defaultValue: "This page is not running inside FirstEdit.",
                    comment: "The bridge was called with nothing behind it.")
         }
         public static var badCall: String {
-            String(localized: "extension.badCall", defaultValue: "First Edit did not understand what this page asked for.",
+            String(localized: "extension.badCall", defaultValue: "FirstEdit did not understand what this page asked for.",
                    comment: "A bridge call that does not name one of the three things.")
         }
         public static var noFrames: String {
@@ -38,7 +38,7 @@ extension Strings {
         }
         public static var confirmNeedsWords: String {
             String(localized: "extension.confirmNeedsWords",
-                   defaultValue: "First Edit will not ask a question with no words in it.",
+                   defaultValue: "FirstEdit will not ask a question with no words in it.",
                    comment: "confirmDestructive without a title or a button label.")
         }
 

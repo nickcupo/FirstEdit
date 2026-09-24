@@ -11,6 +11,8 @@ import PipelineKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `--smoke`: report what the sidebar shows, then quit (tools/smoke.sh).
     nonisolated(unsafe) static var smoke = false
+    nonisolated(unsafe) static var offscreenSmoke = false
+    private var smokeWindow: NSWindow?
 
     let model: AppModel
     /// The picture on the other screen (DESIGN-displays.md). Built here
@@ -24,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The smoke run walks every shoot; it must not leave the next real
         // launch opening on whichever one it walked last.
         model = AppModel(engine: EngineHost(bundle: .main, support: support, settings: .shared),
-                         memory: Self.smoke ? nil : .shared)
+                         memory: Self.smoke ? nil : .shared, observeCards: !Self.offscreenSmoke)
         super.init()
         displays = DisplayDirector(settings: .shared, pump: nil, jobs: model.jobs, screens: screens)
         model.onQuitRequested = {
@@ -34,6 +36,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        if Self.offscreenSmoke {
+            AppearanceController.apply()
+            registerEveryCrew()
+            smokeWindow = OffscreenSmoke.window(model: model)
+            Task {
+                await model.launch()
+                await reportAndQuit()
+            }
+            return
+        }
         NSApp.setActivationPolicy(.regular)
         // Before the first window paints, so it never flips in front of him.
         AppearanceController.apply()
@@ -109,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// SwiftUI replaces the main menu when its scenes change, and the stage
     /// has to get the keyboard back after a trip to PhotoLab.
     func applicationDidBecomeActive(_ notification: Notification) {
+        guard !Self.offscreenSmoke else { return }
         MenuBar.reinstallIfNeeded()
         KeyFocus.restoreAll()
     }
@@ -155,14 +168,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func note(_ s: String) { print(s); fflush(stdout) }
 
+    private func smokeFailure(_ reason: String) -> Never {
+        note("FAIL \(reason)")
+        model.engine?.terminateNow()
+        exit(1)
+    }
+
+    private func checkedSmokeWindow() -> NSWindow? {
+        if Self.offscreenSmoke {
+            guard let smokeWindow, OffscreenSmoke.isolated(smokeWindow) else {
+                smokeFailure("offscreen window isolation was lost")
+            }
+            smokeWindow.contentView?.layoutSubtreeIfNeeded()
+            smokeWindow.displayIfNeeded()
+            return smokeWindow
+        }
+        return SmokeProbe.mainWindow()
+    }
+
     private func reportAndQuit() async {
         let clock = ContinuousClock()
         let deadline = clock.now + .seconds(60)
         while !model.library.loaded, clock.now < deadline {
-            if case .failed(let why) = model.engineState { note("FAIL engine: \(why)"); exit(1) }
+            if case .failed(let why) = model.engineState { smokeFailure("engine: \(why)") }
             try? await Task.sleep(for: .milliseconds(100))
         }
-        guard model.library.loaded else { note("FAIL the library never loaded"); exit(1) }
+        guard model.library.loaded else { smokeFailure("the library never loaded") }
         if case .running(let e) = model.engineState {
             note("ENGINE running on \(e.base.absoluteString) pid \(model.engine?.childPID ?? 0)")
         }
@@ -174,11 +205,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var rows = 0
         for _ in 0..<60 {
             try? await Task.sleep(for: .milliseconds(100))
-            guard let w = SmokeProbe.mainWindow() else { continue }
+            guard let w = checkedSmokeWindow() else { continue }
             rows = SmokeProbe.sidebarRowsDrawn(in: w)
             // A drawn row for every shoot, at least.
-            if rows >= names.count { break }
+            if rows > 0 && rows >= names.count { break }
         }
+        guard rows > 0 && rows >= names.count else { smokeFailure("sidebar rows were not drawn") }
         note("LIBRARY \(names.count) shoots")
         note("SIDEBAR \(rows) rows drawn")
 
@@ -189,11 +221,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             model.navigation.selection = .shoot(name)
             for _ in 0..<40 {
                 try? await Task.sleep(for: .milliseconds(50))
-                if SmokeProbe.mainWindow()?.title == name { break }
+                if checkedSmokeWindow()?.title == name { break }
             }
-            if SmokeProbe.mainWindow()?.title == name { opened.append(name) }
+            if checkedSmokeWindow()?.title == name { opened.append(name) }
         }
         note("SIDEBAR \(opened.count) shoots: \(opened.joined(separator: ", "))")
+        guard opened == names else { smokeFailure("navigation did not open every shoot") }
+        if Self.offscreenSmoke { note("SMOKE_OFFSCREEN_V1 verified") }
         note("SMOKE quitting")
         NSApp.terminate(nil)
     }

@@ -15,7 +15,7 @@ extension Strings {
 
         // 1 — welcome
         public static var welcome: String {
-            s("firstRun.welcome", "Welcome to First Edit", "Page one's title.")
+            s("firstRun.welcome", "Welcome to FirstEdit", "Page one's title.")
         }
         public static var cardTitle: String { s("firstRun.cardTitle", "Copy the card, checked.", "Page one.") }
         public static var cardLine: String {
@@ -43,7 +43,7 @@ extension Strings {
         }
         public static var chooseFolder: String { s("firstRun.chooseFolder", "Choose…", "Page two.") }
         public static var nothingIsMoved: String {
-            s("firstRun.nothingIsMoved", "First Edit never moves anything.", "Page two.")
+            s("firstRun.nothingIsMoved", "FirstEdit never moves anything.", "Page two.")
         }
         public static func foundShoots(_ n: Int, _ where_: String) -> String {
             String(localized: "firstRun.foundShoots",

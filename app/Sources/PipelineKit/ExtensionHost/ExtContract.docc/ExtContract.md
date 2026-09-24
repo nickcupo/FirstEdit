@@ -1,9 +1,9 @@
 # The extension host contract
 
-First Edit can show steps it did not write. An extension declares its own steps, serves a whole
+FirstEdit can show steps it did not write. An extension declares its own steps, serves a whole
 page for each one, and the app draws that page in the detail pane as if it had built it.
 
-**First Edit is complete without one.** Nothing in this document is needed to use the app, and
+**FirstEdit is complete without one.** Nothing in this document is needed to use the app, and
 with no extension installed none of the code behind it runs. This is the contract for anyone who
 wants to add a step.
 
@@ -252,8 +252,8 @@ Draws the app's own sheet and answers `true` only if the person pressed the conf
 
 ```js
 const said = await pipeline.confirmDestructive(
-  "Send 14 photographs out of First Edit?",
-  "They leave this Mac. First Edit cannot take them back afterwards.",
+  "Send 14 photographs out of FirstEdit?",
+  "They leave this Mac. FirstEdit cannot take them back afterwards.",
   "Send 14 Photographs");
 if (!said) return;
 ```
@@ -349,10 +349,10 @@ at the next thing the page asks of the app:
 |---|---|
 | The step declared no page | This step has no page to show. |
 | The page asked for something outside the origin it was served from | This page asked for something it is not being served. |
-| The page tried to navigate off this Mac, or open a window, by anything but a link the person clicked | This page tried to open something outside First Edit. Nothing was opened. |
-| A bridge call the app does not understand | First Edit did not understand what this page asked for. |
+| The page tried to navigate off this Mac, or open a window, by anything but a link the person clicked | This page tried to open something outside FirstEdit. Nothing was opened. |
+| A bridge call the app does not understand | FirstEdit did not understand what this page asked for. |
 | `viewFrames` with no frames | This page asked to show frames and named none. |
-| `confirmDestructive` with no title or no button label | First Edit will not ask a question with no words in it. |
+| `confirmDestructive` with no title or no button label | FirstEdit will not ask a question with no words in it. |
 
 A refusal from your own server is shown as your server wrote it. Write in sentences.
 

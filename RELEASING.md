@@ -1,10 +1,21 @@
 # Releasing
 
-Everything that has to happen before a version of First Edit is in
+Everything that has to happen before a version of FirstEdit is in
 somebody else's hands, in order. Run it yourself, top to bottom; nothing here
 is automated, because every step is one that cannot be taken back. A published
 DMG cannot be unpublished, MIT cannot be revoked, and a pushed history is on
 other people's machines before you have finished reading this sentence.
+
+## Display branding: FirstEdit
+
+Use **FirstEdit** in the release title and user-facing copy. This is a display-only
+change: CFBundleName and CFBundleDisplayName use the new spelling, while
+`First Edit.app`, its `First Edit` executable, `com.nickcupo.firstedit`,
+the existing defaults/migration keys, `Application Support/First Edit` and
+`Photo Pipeline Archive` retain their names. Do not move data or rename the
+installed bundle as part of this release. Existing updater paths remain valid.
+The legacy packaging filenames and disk-image volume label are retained.
+The earlier Photo Pipeline migration section below remains historical guidance.
 
 ## 0. Once, on the machine you release from
 
@@ -257,11 +268,34 @@ again on the signed app — the hardened runtime refusing the bundled
 interpreter is a failure that exists only after signing — records
 `build/gate.json`, and notarizes and staples the DMG.
 
-`SMOKE_LIBRARY` is a scratch clone of a library: with one the smoke test also
-fetches a thumb, a `/full` and a `/crop` and checks each is a picture. Without
-one the app is still launched, against an empty library made in `build/`.
-Point it at a clone, never at `~/photos` — `app/tools/smoke.sh` refuses that
-path outright.
+`SMOKE_LIBRARY` must name a **local clone under `/private/tmp`**. Symbolic
+links, hard-linked files and dataless files are refused before the engine starts.
+With a populated clone the smoke script also fetches a thumb, a `/full` and a
+`/crop` from every culled shoot and checks each bitmap. Without a library,
+`app/build.sh` creates an empty temporary one; this does not prove photo decoding.
+
+Release smoke is now offscreen. `app/tools/smoke.sh --offscreen` runs both
+`FirstEdit --check --smoke-offscreen` and `FirstEdit --smoke-offscreen`. The latter
+hosts the real `RootView` and real engine in a window pinned at (-30000, -30000),
+using SnapshotHarness's unconstrained, non-key/non-main window technique. It
+sets activation policy to prohibited before launch, never starts the SwiftUI App
+scenes, and disables frame restoration. No desktop window or Dock activation is
+requested. It still requires drawn AppKit sidebar rows, navigation of every shoot
+through the real window title, real engine PIDs and confirmed shutdown. The
+legacy `--smoke` command remains visible and is not used by release packaging.
+
+The script creates fresh state under `/private/tmp/first-edit-smoke.*`, discards
+inherited engine overrides, sets a scratch CF preferences home and caches, and
+uses in-memory app settings. It bypasses migrations, notification setup, and
+external-display restoration; it does not bypass engine, RootView, sidebar,
+navigation or shutdown checks. State/log paths are printed and retained for
+inspection. An old binary lacking the offscreen entry point is refused before
+execution, because unknown flags previously opened the ordinary app.
+
+Unsigned and signed smoke checks still run in their original build stages.
+Missing smoke tooling or failed checks block signing/packaging. The exact-bundle
+`gate.json` is still written only after the signed app's smoke succeeds. Static
+checks, compilation, or an offscreen probe alone are not full release validation.
 
 `PRIVATE_BUILD=1` is your own copy — it carries the symlinked private modules,
 is named `-private`, and notarizing it is refused.

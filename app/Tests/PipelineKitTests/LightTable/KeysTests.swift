@@ -152,6 +152,9 @@ struct KeysTests {
         ViewerTests.show(m)
         let dropped = try #require(m.currentStem)
         await ViewerTests.press(m, .drop)
+        // This checks undo while the prompt is open, not its wall-clock lifetime.
+        // A busy CI runner can spend the three seconds between these presses.
+        m.reasonStripUntil = .distantFuture
         ViewerTests.show(m)
         await ViewerTests.press(m, .reason(1))
         await Self.settle()
@@ -164,6 +167,19 @@ struct KeysTests {
         #expect(m.session.rows[dropped]?.label == "")
         #expect(m.session.rows[dropped].map(VerdictValue.his) == .out, "the drop was a step of its own")
         #expect(m.session.undo.steps.count == 1)
+    }
+
+    @Test("the reason prompt targets the dropped frame before its deadline, but not at or after it")
+    func reasonTargetHonoursItsDeadline() async throws {
+        let m = try Self.model()
+        ViewerTests.show(m)
+        let dropped = try #require(m.currentStem)
+        await ViewerTests.press(m, .drop)
+        await m.allSettled()
+        let deadline = try #require(m.reasonStripUntil)
+        #expect(m.reasonTarget(pressedAt: deadline.addingTimeInterval(-0.001)) == dropped)
+        #expect(m.reasonTarget(pressedAt: deadline) == nil)
+        #expect(m.reasonTarget(pressedAt: deadline.addingTimeInterval(0.001)) == nil)
     }
 
     @Test("a D that was refused raises no strip")

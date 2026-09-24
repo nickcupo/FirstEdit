@@ -194,7 +194,7 @@ extension Strings {
         public static var extensionLabel: String { s("settings.extension", "Extension", "Advanced.") }
         public static var extensionFound: String { s("settings.extensionFound", "Found", "Advanced.") }
         public static var extensionNotFound: String {
-            s("settings.extensionNotFound", "Not found. First Edit is complete without one.", "Advanced.")
+            s("settings.extensionNotFound", "Not found. FirstEdit is complete without one.", "Advanced.")
         }
         public static var pictureModel: String {
             s("settings.pictureModel", "The cull's picture model", "Advanced.")

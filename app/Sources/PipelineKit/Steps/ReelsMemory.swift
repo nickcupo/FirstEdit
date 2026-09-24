@@ -16,7 +16,7 @@ import Foundation
 /// A memory with no defaults remembers nothing — every model made outside
 /// `ReelsModelStore`, the tests and the snapshot harness.
 public final class ReelsMemory: @unchecked Sendable {
-    public static let shared = ReelsMemory(defaults: .standard)
+    public static let shared = ReelsMemory(defaults: AppDefaults.current)
 
     private let defaults: UserDefaults?
 

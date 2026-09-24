@@ -60,8 +60,10 @@ public final class AppModel {
     private var readyFor: EngineHost.Endpoint?
     private var restored = false
     private let preview: Bool
+    private let observeCards: Bool
 
-    public init(engine: EngineHost, memory: SettingsStore? = .shared) {
+    public init(engine: EngineHost, memory: SettingsStore? = .shared, observeCards: Bool = true) {
+        self.observeCards = observeCards
         self.engine = engine
         self.engineState = .stopped
         self.library = Library()
@@ -85,6 +87,7 @@ public final class AppModel {
         self.updates = UpdateCoordinator()
         self.navigation = navigation
         self.preview = true
+        self.observeCards = false
         self.memory = nil
         // The harness and previews never read a card plugged into the Mac
         // they run on: a scene's card is the one it hands in.
@@ -310,7 +313,7 @@ public final class AppModel {
     /// Start the engine and keep the rest of the app in step with it.
     public func launch() async {
         guard let engine else { return }
-        importModel.watch()
+        if observeCards { importModel.watch() }
         if watchers.isEmpty {
             watchers.append(Task { [weak self] in
                 for await s in engine.states { self?.engineChanged(s) }

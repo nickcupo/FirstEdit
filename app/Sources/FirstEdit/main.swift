@@ -3,11 +3,17 @@
 //   FirstEdit                     the app
 //   FirstEdit --check             start the engine, list the shoots, stop (DESIGN.md §4.4)
 //   FirstEdit --check --deep      and fetch one thumb, one /full and one /crop
-//   FirstEdit --smoke             the app, which reports what its sidebar shows and quits
+//   FirstEdit --smoke             the visible app, reports its sidebar and quits
+//   FirstEdit --smoke-offscreen   the real shell offscreen, with strict scratch isolation
 import AppKit
 import PipelineKit
 
 let arguments = CommandLine.arguments
+let offscreen = arguments.contains("--smoke-offscreen")
+if offscreen {
+    do { try OffscreenSmoke.prepare() }
+    catch { print("FAIL offscreen isolation: \(error.localizedDescription)"); exit(2) }
+}
 
 if arguments.contains("--check") {
     let deep = arguments.contains("--deep")
@@ -24,6 +30,11 @@ if arguments.contains("--check") {
         exit(code)
     }
     dispatchMain()
+}
+
+if offscreen {
+    OffscreenSmoke.run()
+    exit(0)
 }
 
 // Before the first scene reads a setting and before AppDelegate names the

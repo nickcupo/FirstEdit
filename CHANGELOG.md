@@ -2,6 +2,10 @@
 
 ## 0.1.5
 
+The app now displays **FirstEdit** in its windows, menus and About panel.
+The installed `First Edit.app`, support folder, settings identifiers and saved
+work stay where they are; this spelling change performs no data migration.
+
 Cull suggestions now stand out with a purple star and **Suggested** badge in the
 filmstrip, beside the main photograph, in Compare and in the Full Image controls.
 Your own Keep and Drop marks take precedence. Suggested stack members remain at

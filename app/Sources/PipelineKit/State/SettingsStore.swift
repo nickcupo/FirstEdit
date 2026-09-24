@@ -16,7 +16,7 @@ public final class SettingsStore: @unchecked Sendable {
 
     public let defaults: UserDefaults
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = AppDefaults.current) {
         self.defaults = defaults
     }
 

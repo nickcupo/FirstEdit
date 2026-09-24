@@ -37,13 +37,13 @@ extension Strings {
         }
         public static func staged(_ v: String) -> String {
             String(localized: "update.staged",
-                   defaultValue: "Version \(v) is downloaded and checked. Installing it quits First Edit and opens the new version.",
+                   defaultValue: "Version \(v) is downloaded and checked. Installing it quits FirstEdit and opens the new version.",
                    comment: "When the download has finished.")
         }
         /// Over the engine's reason - no connection, GitHub answering 404 -
         /// which is printed under it as it was written.
         public static var couldNotCheck: String {
-            u("update.couldNotCheck", "First Edit could not find out whether there is a newer version.",
+            u("update.couldNotCheck", "FirstEdit could not find out whether there is a newer version.",
               "When the check he asked for did not get an answer.")
         }
         public static var waitForTheJob: String {

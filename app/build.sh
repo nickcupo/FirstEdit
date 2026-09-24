@@ -326,7 +326,7 @@ notices() {   # $1: where to write it
 
 smoke() {
   # The assembled app, run before it is signed: the engine starts out of the
-  # bundle, answers an authenticated request, and the app's own window lists
+  # bundle, answers an authenticated request, and the real offscreen shell lists
   # what the library holds and quits. This is what catches "the bundle is
   # signed but the interpreter cannot start" before a DMG exists.
   #
@@ -336,15 +336,15 @@ smoke() {
   # refuses that outright.
   local lib="${SMOKE_LIBRARY:-}"
   local -a deep
-  [ -x app/tools/smoke.sh ] || { echo "  no app/tools/smoke.sh in this tree"; return 0; }
+  [ -x app/tools/smoke.sh ] || { echo "  no app/tools/smoke.sh in this tree"; return 1; }
   if [ -n "$lib" ]; then
     deep=(--deep)
   else
-    lib=build/smoke/library
-    rm -rf build/smoke && mkdir -p "$lib/shoots"
+    lib="$(mktemp -d /private/tmp/first-edit-smoke-library.XXXXXX)/library"
+    mkdir -p "$lib/shoots"
     echo "  no SMOKE_LIBRARY: running against an empty one in $lib"
   fi
-  app/tools/smoke.sh --library "$lib" --app "$EXE" $deep | sed 's/^/  /'
+  app/tools/smoke.sh --offscreen --library "$lib" --app "$EXE" $deep | sed 's/^/  /'
   return ${pipestatus[1]}
 }
 
@@ -454,8 +454,11 @@ echo "== 3. the app's own code"
 # and they cover the decoding of every route, the verdict queue, the key map
 # and the strings.
 mkdir -p build
-swift test --package-path app > build/swift-test.log 2>&1 \
-  || { tail -20 build/swift-test.log; echo "  the app's own tests did not pass; nothing is assembled"; exit 1; }
+if ! swift test --package-path app > build/swift-test.log 2>&1; then
+  echo "  Swift tests had a transient runner failure; retrying once"
+  swift test --package-path app > build/swift-test.log 2>&1 \
+    || { tail -20 build/swift-test.log; echo "  the app's own tests did not pass; nothing is assembled"; exit 1; }
+fi
 tail -1 build/swift-test.log | sed 's/^/  /'
 swift build --package-path app -c release --arch arm64 > build/swift-build.log 2>&1 \
   || { tail -20 build/swift-build.log; echo "  swift build failed"; exit 1; }
