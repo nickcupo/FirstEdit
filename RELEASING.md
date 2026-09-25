@@ -12,16 +12,17 @@ On the release Mac, from a clean checkout at the release tag:
 
 ```sh
 git status --short
-git clone -q . /private/tmp/fe-smoke
-SMOKE_LIBRARY=/private/tmp/fe-smoke IDENTITY="Developer ID Application: Nick Cupo (72BLQYHMTN)" NOTARY_PROFILE=AC_PASSWORD app/build.sh
+IDENTITY="Developer ID Application: Nick Cupo (72BLQYHMTN)" NOTARY_PROFILE=AC_PASSWORD app/build.sh
 ```
 
 `git status --short` should print nothing (an untracked file is left out of
-the build, but read what it is). The clone is the smoke test's scratch
-library; if `/private/tmp/fe-smoke` is already there from an earlier build,
-skip that line and reuse it. `AC_PASSWORD` is the notary profile stored in
-this Mac's keychain. The DMG and its notices land in `dist/`. Steps 5 to 7
-below are the same thing in full, with the checks around it.
+the build, but read what it is). With no `SMOKE_LIBRARY` the smoke test runs
+the app against an empty library it makes itself, which is enough to prove
+the bundle. To also cull real photos, add `SMOKE_LIBRARY=` naming a scratch
+copy of a photo library (a folder with `shoots/` in it) under `/private/tmp`,
+never the repo and never `~/photos`. `AC_PASSWORD` is the notary profile
+stored in this Mac's keychain. The DMG and its notices land in `dist/`.
+Steps 5 to 7 below are the same thing in full, with the checks around it.
 
 ## Display branding: FirstEdit
 
