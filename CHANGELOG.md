@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.6
 
 Every frame's starting edit now carries its own color: flatter frames get
 more Vibrancy (toward the ×1.10–1.15 lift preference studies find), vivid or
