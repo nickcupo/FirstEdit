@@ -33,7 +33,7 @@ since it shipped has yet passed the check that would let it be used.
 ## Install
 
 Download the FirstEdit `.dmg` from the
-[GitHub releases page](https://github.com/nickcupo/first-edit/releases),
+[GitHub releases page](https://github.com/nickcupo/FirstEdit/releases),
 then drag FirstEdit into Applications. OpenCV is included inside the app;
 the separate wheel files are only for building from source. The app requires an Apple silicon Mac running
 macOS 15 or newer. Release notes state whether the installer is notarized.
@@ -173,7 +173,7 @@ out, `X` to clear, the space bar to open the cut and adjust it, `Q` to undo
 `<shoot>/instagram`: a crop and a resize of the export, with no sharpening
 and no tone added.
 
-Installers are available on the [releases page](https://github.com/nickcupo/first-edit/releases).
+Installers are available on the [releases page](https://github.com/nickcupo/FirstEdit/releases).
 The app checks that page for updates and verifies the signing identity before
 installing one. The installed bundle is `FirstEdit.app`; on first launch the
 former `Application Support/First Edit` folder is migrated to
