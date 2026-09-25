@@ -364,7 +364,7 @@ def test_a_frame_measured_before_the_store_kept_the_sensor_reading_is_measured_o
         row = {"key": f"2026-09-19/{name}", "kind": "frame", "shoot": "2026-09-19",
                "schema": taste.MEASURE_SCHEMA, "sidecar": "abc", "export": "e", "m": {}}
         if i > 2:                                       # measured since the store kept the reading
-            row.update(clip_any=0.001, subject_Y=None)
+            row.update(clip_any=0.001, subject_Y=None, frame_Y=0.05, headroom_ev=2.0, lv=10.0, iso=400.0)
         rows.append(row)
     monkeypatch.setattr(taste, "teaching", lambda root: frames)
     learned.measured_add(rows)

@@ -287,7 +287,8 @@ struct RealEngineTests {
         #expect(r.shoots.isEmpty)
         let job = try await StudioClient(endpoint: e).get(Routes.job())
         #expect(!job.running)
-        await #expect(throws: StudioError.refused("no such shoot")) {
+        // The engine sends every refusal as a sentence (studio.sentence_case).
+        await #expect(throws: StudioError.refused("No such shoot")) {
             _ = try await StudioClient(endpoint: e).get(Routes.shoot("not-there"))
         }
         await host.stop()

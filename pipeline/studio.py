@@ -68,7 +68,7 @@ sys.path.insert(0, str(HERE))
 # `library` is already a function in this module (the /api/library
 # answer), so the module it shadows is imported under its own two
 # names rather than renamed wholesale.
-from library import is_shoot, shelf  # noqa: E402
+from library import frame_raw, is_shoot, raw_index, shelf, sidecar_path, paths as shoot_paths  # noqa: E402
 from common import (APP_BUNDLE_NAME, APP_NAME, FOR_APP_ENV, decision_path, read_cull, EXT, EXIFTOOL, clip_ready, seed_models,  # noqa: E402
                     support_dir, write_atomic, write_json_atomic)
 ROOT = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
@@ -753,15 +753,19 @@ class KeyUnreadable(ValueError):
 
 class Shoot:
     def __init__(self, folder: Path):
-        self.folder = folder
-        self.raw = folder / "raw" if (folder / "raw").is_dir() else folder
-        # cull/, as library.cull_dir and cull.py have it, unless a flat folder
-        # was culled by the old fork and holds only a _cull/ - which is still
-        # read and written, rather than a second cull started beside it.
-        legacy = folder / "_cull"
-        self.cull = (legacy if self.raw.name != "raw" and legacy.is_dir() and not (folder / "cull").exists()
-                     else folder / "cull")
-        self.export = folder / "export"
+        # The one resolver (library.paths), which every command reads a shoot
+        # by: raw/ when there is one, else the shoot itself; the cull where
+        # cull.csv is, then whichever of cull/ and _cull/ exists, else cull/.
+        # A flat folder culled by the old fork into _cull/ is still read and
+        # written there rather than a second cull started beside it. This had
+        # a rule of its own that took _cull/ only while no cull/ existed at
+        # all, so an empty cull/ made beside it by any other command turned
+        # the studio's back on the real cull.
+        where = shoot_paths(folder)
+        self.folder = where.shoot
+        self.raw = where.raw
+        self.cull = where.cull
+        self.export = where.export
         # Why the answer key was not written on the last star click. A click
         # must not fail because the key was left alone, but it must not go by
         # in silence either: the page prints this in place of the keeper hint.
@@ -1380,12 +1384,17 @@ class Shoot:
                     rating = {"5": 3, "3": 3, "2": 2, "1": 1}.get(r["rating"], 0)
                     break
         if rating is not None:
-            side = self.raw / f"{file}.dop"
+            # Beside the frame's RAW and named for it (library.sidecar_path):
+            # the cull can name a frame by the camera JPEG it decoded, and
+            # raw/TSC04016.jpg.dop is a file PhotoLab never opens, so a star
+            # clicked on such a frame never reached TSC04016.ARW.dop. No RAW
+            # here, no sidecar to keep in step.
+            side = sidecar_path(self.folder, file)
             # write_atomic writes THROUGH a link, which is right for the
             # decisions folder and wrong here: a sidecar that is a link out of
             # this shoot would carry the star into whatever it points at. A
             # link that stays inside the shoot (edit/ beside raw/) is his.
-            if side.exists() and within(side, self.folder):
+            if side is not None and side.exists() and within(side, self.folder):
                 # A half-written .dop is not a lost star, it is PhotoLab
                 # refusing to launch past the sidecar and never saying which.
                 write_atomic(side, re.sub(r"Rating = \d+,", f"Rating = {rating},", side.read_text(), count=1))
@@ -1462,7 +1471,12 @@ class Shoot:
         """The frames of this shoot he has exported, wherever he exported them:
         export/, a folder inside edit/ (PhotoLab's default lands beside the
         RAWs), or iCloud. 154 keepers once sat in edit/edited/ unseen."""
-        raws = {Path(r["file"]).stem: self.raw / r["file"] for r in self.rows()}
+        # The frame's RAW by its number (library.frame_raw), for a cull that
+        # names the camera JPEG; where it has gone, the name the cull gave it,
+        # which taste still dates by the shoot's own cull.csv.
+        have = raw_index(self.folder)
+        raws = {Path(r["file"]).stem: have.get(Path(r["file"]).stem) or self.raw / r["file"]
+                for r in self.rows()}
         out = set()
         if self.export.is_dir():
             out |= {p.stem.split("_DxO")[0] for p in self.export.glob("*.jp*g")} & set(raws)
@@ -6220,8 +6234,15 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _raw(s, stem: str):
-        return next((s.raw / f"{stem}{e}" for e in (".ARW", ".arw", ".NEF", ".CR2", ".CR3", ".RAF", ".DNG")
-                     if (s.raw / f"{stem}{e}").exists()), None)
+        # By number, whatever its extension, where library.frame_raw looks:
+        # raw/ (or a flat shoot's own folder) first, then edit/ and
+        # cull/picks/, so a RAW moved beside its edit is still this frame's
+        # original and its decode is not read as the last pixels. This spelled
+        # out seven extensions of its own and missed .orf and .rw2, which
+        # common.RAW_EXTS has. frame_raw takes a file name and drops its
+        # suffix; a stem is handed with one so a stem with a dot in it is kept
+        # whole.
+        return frame_raw(s.folder, f"{stem}.jpg")
 
     @staticmethod
     def _decoded(s, stem: str):

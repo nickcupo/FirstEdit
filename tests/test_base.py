@@ -280,7 +280,32 @@ def test_the_note_gives_the_shortfall_and_not_the_clamp():
     want = presets._stops_to_band(lin["face_Y"], presets.PUBLISHED.FACE_L_LO, presets.PUBLISHED.FACE_L_HI, 1.3)
     assert want > 1.0, want
     assert f"{want:+.2f} EV short" in note
-    assert ev == 0.0
+    # A face this far under is lifted globally, as far as one auto move goes,
+    # and the note still gives the whole shortfall.
+    assert ev == presets.DAYLIGHT_FACE_LIFT and "held by" in note
+
+
+def test_a_frame_with_no_face_goes_to_the_target_for_its_light():
+    """Daylight midtones to L* 50, a dim frame to less, a lift never past the
+    highlights' headroom or the noise, and a small difference left alone."""
+    Y = lambda L: presets.Y(L) / 2 ** 1.3  # noqa: E731 - a raw luminance that renders at L*
+    day = {"frame_Y": Y(35), "clip_any": 0.0, "faces": [], "lv": 12, "headroom_ev": 3.0}
+    _, ev, note = presets.decide_exposure(day, 50.0, gain=1.3, prefer="Manual")
+    assert 0.5 < ev <= presets.AUTO_EV_MAX and f"target L* {presets.daylight_trim(50, 12):.0f}" in note
+    night = dict(day, lv=3, frame_Y=Y(26))
+    assert presets.decide_exposure(night, 50.0, gain=1.3, prefer="Manual")[1] == 0.0      # already near its dim target
+    backlit = dict(day, headroom_ev=0.4)
+    _, ev, note = presets.decide_exposure(backlit, 50.0, gain=1.3, prefer="Manual")
+    assert ev <= 0.25 + 1e-6 or ev == 0.0
+    noisy = dict(day, iso=12800)
+    assert presets.decide_exposure(noisy, 50.0, gain=1.3, prefer="Manual")[1] == 0.0
+    dusk = dict(day, lv=6, frame_Y=Y(30))                                              # low light: toward L* 40, within 0.8 stop at LV 6
+    ev = presets.decide_exposure(dusk, 50.0, gain=1.3, prefer="Manual")[1]
+    assert 0 < ev <= 0.8 + 1e-6
+    mid = dict(day, lv=6, frame_Y=Y(45))                                               # between the low key and mid-grey: as shot
+    assert presets.decide_exposure(mid, 50.0, gain=1.3, prefer="Manual")[1] == 0.0
+    bright = dict(day, frame_Y=Y(70))
+    assert presets.decide_exposure(bright, 50.0, gain=1.3, prefer="Manual")[1] < 0
 
 
 LOOK = {"ColorRenderingType": "Original", "ChannelMixerRed": 4.0, "NoiseRemovalMethod": "DeepRaw2RGBv7"}
@@ -307,3 +332,25 @@ def test_an_elected_rendering_does_reach_a_frame(monkeypatch):
     keep, dropped = presets.legal_look(LOOK)
     assert keep["ColorRenderingType"] == "Fidelity"        # the probe's, not the look's
     assert any("stored look" in d for d in dropped)
+
+
+def test_a_face_inside_the_band_but_dark_is_lifted_toward_its_middle():
+    """The band runs 39.8 to 67.3; a face at its dark edge is 'in' and still
+    reads dark, so it is lifted toward the middle - never past L* 58, never
+    darkened, and not at all without headroom."""
+    y = presets.Y(43) / 2 ** 1.3                          # renders at L* 43
+    lin = {"face_Y": y, "clip_any": 0.0, "faces": [], "headroom_ev": 3.0, "lv": 12, "frame_Y": y}
+    keys, ev, note = presets.decide_exposure(lin, 50.0, gain=1.3, prefer="Manual")
+    assert keys["ExposureActive"] and 0.3 < ev <= presets.DAYLIGHT_FACE_LIFT and "inside" in note
+    assert presets.decide_exposure(dict(lin, headroom_ev=0.2), 50.0, gain=1.3, prefer="Manual")[1] == 0.0
+    bright = dict(lin, face_Y=presets.Y(64) / 2 ** 1.3)
+    assert presets.decide_exposure(bright, 50.0, gain=1.3, prefer="Manual")[1] == 0.0
+
+
+def test_the_tone_curve_is_a_gentle_s_and_skips_wide_scenes():
+    day, _ = presets.tone_curve(12, 50)
+    low, _ = presets.tone_curve(4, 50)
+    assert day[:2] == [0.0, 0.0] and day[-2:] == [1.0, 1.0]
+    assert day[3] < 0.125 < day[13] - 0.5                 # shadows down, highlights up
+    assert (0.125 - low[3]) < (0.125 - day[3])            # gentler in low light
+    assert presets.tone_curve(12, 90)[0] is None

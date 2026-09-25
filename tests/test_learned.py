@@ -1862,3 +1862,60 @@ def test_an_unreadable_record_is_said_as_a_flag_with_the_file_beside_it_not_a_ho
 def test_a_readable_record_is_not_flagged(lib):
     p = learned.panel(lib)
     assert "unreadable" not in p and p["error"] == ""
+
+
+def test_the_learned_cull_is_the_one_every_command_reads(tmp_path):
+    """learned.cull_dir is library.paths' cull. It said _cull/ for any shoot
+    with no raw/ and no cull.csv yet, so a flat shoot with only cull/, and
+    every new empty one, was sent to a folder nothing else looks in."""
+    flat = tmp_path / "ducksAndDeadlifts"
+    (flat / "cull").mkdir(parents=True)
+    (flat / "TSC05691.ARW").write_bytes(b"r")
+    assert learned.cull_dir(flat) == flat / "cull"
+    new = tmp_path / "2026-10-01"
+    new.mkdir()
+    assert learned.cull_dir(new) == new / "cull"
+    (new / "TSC00001.ARW").write_bytes(b"r")                  # frames loose in it, nothing culled
+    assert learned.cull_dir(new) == new / "cull"
+    assert not (new / "_cull").exists() and not (new / "cull").exists()
+    old = tmp_path / "old-flat"                                 # an old flat cull is still read
+    (old / "_cull").mkdir(parents=True)
+    (old / "_cull" / "cull.csv").write_text("file\n")
+    (old / "cull").mkdir()
+    assert learned.cull_dir(old) == old / "_cull"
+
+
+def test_a_flat_shoots_finished_sidecars_are_in_its_fingerprint(tmp_path):
+    """The sidecars of a flat shoot lie loose beside its RAWs. The fingerprint
+    counted raw/, edit/ and cull/picks/ only, so finishing one never changed
+    it and never asked for the shoot to be learned from again."""
+    flat = tmp_path / "ducksAndDeadlifts"
+    flat.mkdir()
+    (flat / "TSC05691.ARW").write_bytes(b"r")
+    assert learned._fingerprint(flat)["sidecars"] == 0
+    (flat / "TSC05691.ARW.dop").write_text("Overrides = {\n},\n")
+    assert learned._fingerprint(flat)["sidecars"] == 1
+
+
+def test_taste_frame_raw_answers_as_it_did(tmp_path):
+    """taste.frame_raw is library.frame_raw now, and answers the same: by
+    number, whatever the extension, raw/ ahead of edit/ and the picks, a flat
+    shoot's loose RAWs, a stem with a dot in it, and None for a frame whose
+    RAW is not here."""
+    s = tmp_path / "2026-09-12-lounge"
+    for d in ("raw", "edit", "cull/picks"):
+        (s / d).mkdir(parents=True)
+    (s / "raw" / "TSC04015.ARW").write_bytes(b"r")
+    (s / "edit" / "TSC04015.ARW").write_bytes(b"e")
+    (s / "edit" / "TSC04016.NEF").write_bytes(b"e")
+    (s / "cull" / "picks" / "TSC04017.ARW").write_bytes(b"p")
+    (s / "raw" / "DSC_0001.v2.ARW").write_bytes(b"r")
+    assert taste.frame_raw(s, "TSC04015") == s / "raw" / "TSC04015.ARW"
+    assert taste.frame_raw(s, "TSC04016") == s / "edit" / "TSC04016.NEF"
+    assert taste.frame_raw(s, "TSC04017") == s / "cull" / "picks" / "TSC04017.ARW"
+    assert taste.frame_raw(s, "DSC_0001.v2") == s / "raw" / "DSC_0001.v2.ARW"
+    assert taste.frame_raw(s, "TSC09999") is None
+    flat = tmp_path / "ducksAndDeadlifts"
+    flat.mkdir()
+    (flat / "TSC05691.ARW").write_bytes(b"r")
+    assert taste.frame_raw(flat, "TSC05691") == flat / "TSC05691.ARW"

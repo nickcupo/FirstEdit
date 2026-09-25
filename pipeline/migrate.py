@@ -109,6 +109,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import stop_cleanly_on_sigterm  # noqa: E402
+import library  # noqa: E402
 
 ROOT = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
 
@@ -223,7 +224,13 @@ def stamp() -> str:
 
 def raw_dir(shoot: Path) -> Path:
     """The same branch five other modules repeat. Kept identical on purpose:
-    this file is a migration, not the place to change what a shoot is."""
+    this file is a migration, not the place to change what a shoot is.
+
+    Deliberately not library.paths(shoot).raw, whose answer is the same on
+    every shoot folder: the library's resolver also re-roots a raw/ it is
+    pointed at to the shoot around it, and a migration has to act on exactly
+    the folder it was handed - its journal, decisions/ and --undo are all
+    anchored there (see cull_dir)."""
     return shoot / "raw" if (shoot / "raw").is_dir() else shoot
 
 
@@ -237,7 +244,33 @@ def cull_dir(shoot: Path) -> Path:
     and no `raw/` at all, and this function used to answer `_cull` for it, so
     the run printed "no cull/ yet", moved nothing, and swallowed the
     unrecomputable-cull.csv warning in the one state where that warning is the
-    whole point. Reported by the review of 2026-09-18."""
+    whole point. Reported by the review of 2026-09-18.
+
+    Routed through library.paths, the one rule, rather than frozen at this
+    file's own, because the two differ in exactly one state and there the old
+    answer does harm: a flat shoot with an empty cull/ made by some other
+    command and its real cull in _cull/. This migrated the empty cull/, and
+    since decision_path lets a file in decisions/ win over the cull's own,
+    any stray decision file in that cull/ would have come to outrank the real
+    one in _cull/ for every reader. Everywhere else the answers are the same
+    (a folder that exists is believed ahead of a name), except that a shoot
+    with no cull at all is now answered cull/, never _cull/ - which changes
+    nothing here, because a migration never creates the folder it is told
+    about, only reads it. A migration already done is unaffected: --undo
+    walks its journal, not this. Re-run over the one divergent state, it
+    now reaches the _cull/ it missed, and a file there that disagrees with
+    one already in decisions/ is a `conflict` like any other: both kept.
+
+    The library's answer is taken only when it is about this very folder.
+    Pointed at a raw/ (or a cull/), library.paths answers for the shoot
+    around it while decisions/ and the journal here would be made inside the
+    folder handed in - the decisions of one folder moved into another. So a
+    folder the resolver re-roots keeps this file's old answer, the one it
+    always had there."""
+    shoot = Path(shoot)
+    where = library.paths(shoot)
+    if where.shoot == shoot.expanduser():
+        return where.cull
     for name in ("cull", "_cull"):
         if (shoot / name).is_dir():
             return shoot / name

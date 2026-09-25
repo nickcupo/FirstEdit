@@ -176,37 +176,136 @@ def raw_dir(shoot: Path) -> Path:
 def cull_dir(shoot: Path) -> Path:
     """Where this shoot's cull output is.
 
-    A folder that is on disk is believed ahead of the convention. `cull/` is
-    the name this module hands out and the one cull.py writes - the `_cull`
-    fork produced the stray folder beside the dog shoot that had to be moved
-    back by hand, file by file - but a flat folder culled before that may
-    still hold a `_cull`, and reclaim, migrate and archive all read one where
-    they find it. This alone did not, so on a flat folder culled today it read no
-    cull.csv, computed no pixels of record, and filed the last pixels of a
-    cleared frame as "nothing here wrote it": the one verdict that is never
-    supposed to be reached by accident."""
-    shoot = Path(shoot)
-    kind = layout(shoot)
-    if kind == "raw":
-        return shoot.parent / "cull"
-    if kind in ("standard", "flat"):
-        for name in ("cull", "_cull"):
-            if (shoot / name).is_dir():
-                return shoot / name
-        return shoot / "cull"
-    raise NotAShoot(f"{shoot} holds no frames; it is not a shoot yet")
+    ONE rule, used by every command (paths() below):
+      1. whichever of cull/ and _cull/ holds a cull.csv, cull/ first;
+      2. else whichever of them exists, cull/ first;
+      3. else cull/, which is the only name a new cull is ever given.
+    `_cull` is read where an old flat shoot has one and never handed out:
+    the `_cull` fork produced the stray folder beside the dog shoot that had
+    to be moved back by hand, file by file. And a folder that HOLDS the cull
+    wins over one that merely exists, because the question every caller is
+    asking is "where is cull.csv"; a flat shoot with an empty cull/ made by
+    one command and the real cull in _cull/ used to get a different answer
+    from each of nine resolvers."""
+    return paths(shoot).cull
 
 
 def shoot_root(path: Path) -> Path:
-    """The shoot folder a path belongs to, given raw/, cull/ or a frame."""
-    path = Path(path)
+    """The shoot folder a path belongs to, given the shoot itself, its raw/,
+    its cull/ (or an old _cull/), or a file in any of them.
+
+    Every command takes whichever of these a person points it at: `pl cull`
+    was documented on <shoot>/raw, gather on <shoot>, and presets worked only
+    on raw/ - on a flat shoot or a shoot folder it looked for a _cull that
+    was not there and stopped. Resolving the argument here is what makes the
+    three the same."""
+    path = Path(path).expanduser()
     if path.is_file():
         path = path.parent
-    if path.name in ("raw", "cull") and (path.parent / "shoot.json").exists():
-        return path.parent
     if path.name == "raw":
         return path.parent
+    if path.name in ("cull", "_cull") and ((path / "cull.csv").exists() or (path.parent / "shoot.json").exists()
+                                           or (path.parent / "raw").is_dir() or _has_frames(path.parent)):
+        return path.parent
     return path
+
+
+@dataclass(frozen=True)
+class ShootPaths:
+    """A shoot's folders, whatever the layout and whichever of them was
+    pointed at. Never raises: an empty or archived shoot still has a place
+    its cull is, and its RAW folder is raw/ if it has one."""
+    shoot: Path
+    raw: Path
+    cull: Path
+
+    @property
+    def decisions(self) -> Path:
+        return self.shoot / "decisions"
+
+    @property
+    def picks(self) -> Path:
+        return self.cull / "picks"
+
+    @property
+    def edit(self) -> Path:
+        return self.shoot / "edit"
+
+    @property
+    def export(self) -> Path:
+        return self.shoot / "export"
+
+
+def paths(path: Path) -> ShootPaths:
+    """The one resolver: shoot, RAW folder and cull folder for any path into
+    a shoot. See shoot_root for what may be pointed at and cull_dir for the
+    cull rule."""
+    shoot = shoot_root(path)
+    raw = shoot / "raw" if (shoot / "raw").is_dir() else shoot
+    cull = None
+    for name in ("cull", "_cull"):
+        if (shoot / name / "cull.csv").exists():
+            cull = shoot / name
+            break
+    if cull is None:
+        for name in ("cull", "_cull"):
+            if (shoot / name).is_dir():
+                cull = shoot / name
+                break
+    return ShootPaths(shoot=shoot, raw=raw, cull=cull or shoot / "cull")
+
+
+# By number, whatever the extension: the RAW behind a cull.csv row.
+_RAWS: dict[str, tuple[tuple, dict[str, Path]]] = {}
+
+
+def raw_index(shoot: Path) -> dict[str, Path]:
+    """Stem -> this shoot's RAW of that number (frame_raw's lookup table),
+    for a caller resolving many rows of one shoot: the shoot is resolved and
+    its folders stat'd once, not once per row.
+
+    A link in edit/ or cull/picks/ counts only while it still leads to a
+    file. The cull's picks are symlinks into raw/ by default, and once the
+    RAWs are cleared (2026-09-12-lounge: 6 RAWs left of 296) each one
+    dangles: counting it made the studio take a frame whose decode is its
+    last pixels for one with an original, and presets put a sidecar beside
+    the dangling link. raw/ itself is taken as it lists, because a RAW there
+    that is away (evicted to iCloud, a link to a card not mounted) is not
+    gone, and its sidecar stays under the name it comes back to."""
+    p = paths(shoot)
+    folders = [p.raw, p.shoot, p.edit, p.picks]
+    stamp = tuple(f.stat().st_mtime_ns if f.is_dir() else 0 for f in folders)
+    got = _RAWS.get(str(p.shoot))
+    if not got or got[0] != stamp:
+        index: dict[str, Path] = {}
+        for folder in reversed(folders):         # raw/ last, so it wins
+            if folder.is_dir():
+                own = folder in (p.raw, p.shoot)
+                index.update({f.stem: f for f in folder.iterdir()
+                              if f.suffix.lower() in RAW_EXTS and (own or f.exists())})
+        got = (stamp, index)
+        _RAWS[str(p.shoot)] = got
+    return got[1]
+
+
+def frame_raw(shoot: Path, name: str) -> Path | None:
+    """This frame's RAW, found by its number whatever extension the cull
+    wrote down, if it is still here. cull.csv can name the camera JPEG the
+    cull decoded (2026-09-12-lounge's says TSC04015.jpg) and looking for
+    raw/TSC04015.jpg found nothing beside raw/TSC04015.ARW. Looks in raw/
+    (or the flat shoot folder), then edit/ and cull/picks/; raw/ wins
+    (raw_index)."""
+    return raw_index(shoot).get(Path(name).stem)
+
+
+def sidecar_path(shoot: Path, name: str) -> Path | None:
+    """Where this frame's PhotoLab sidecar belongs: beside its RAW, named for
+    the RAW (TSC04016.ARW.dop), whatever name the cull gave the frame. None
+    when the RAW is not here, because a sidecar beside nothing is a file
+    PhotoLab never opens - which is what TSC04016.jpg.dop was."""
+    raw = frame_raw(shoot, name)
+    return raw.with_name(raw.name + ".dop") if raw is not None else None
+
 
 
 def holds_shoots(folder: Path) -> bool:

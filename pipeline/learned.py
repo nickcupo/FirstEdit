@@ -58,6 +58,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from common import (MODELS, RAW_EXTS, deal_tiers, stack_tiers, decision_path, learned_dir,  # noqa: E402
                     write_atomic, write_json_atomic)
+import library  # noqa: E402
 
 ROOT = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
 # The neutral starting edit that ships with the code: no venues, no ranker, and
@@ -531,7 +532,12 @@ def version_model(learner: str, ts: str) -> dict | None:
 #       rule, only what he exported teaching, for the candidate and the one
 #       in use alike (edit_count): a starting edit checked under 4, against a
 #       count made under the older rule, is learned again.
-RULES_VERSION = 5
+#   6 - 2026-09-25: a starting edit's per-frame brightness, face lightness
+#       and contrast learned from his exports (taste.learn_tone) are gated
+#       (_check_tone): on their own held-out bar against the rule, when one
+#       the one in use has would be dropped, and against the one in use on
+#       the same frames in the same folds.
+RULES_VERSION = 6
 
 
 def _write_check(learner: str, ts: str, check: dict) -> None:
@@ -672,15 +678,19 @@ def shoot_meta(shoot: Path) -> dict:
 
 
 def cull_dir(shoot: Path) -> Path:
-    """Where this shoot's cull.csv is: cull/ beside raw/, _cull/ on a flat
-    shoot - but a cull.csv that is actually there wins over either rule, the
-    way decision_path lets an existing file win. A delivered shoot whose RAWs
-    have gone to iCloud has no raw/ folder left, and answering _cull/ for it
-    dropped the whole shoot, and its 200 keepers, out of every check."""
-    for c in (shoot / "cull", shoot / "_cull"):
-        if (c / "cull.csv").exists():
-            return c
-    return shoot / "cull" if (shoot / "raw").is_dir() else shoot / "_cull"
+    """Where this shoot's cull.csv is: library.paths' answer, the one rule
+    every command uses (library.cull_dir says it in full). A cull.csv that is
+    actually there still wins, the way decision_path lets an existing file
+    win: a delivered shoot whose RAWs have gone to iCloud has no raw/ left,
+    and answering _cull/ for it dropped the whole shoot, and its 200 keepers,
+    out of every check.
+
+    What changed is the answer when there is no cull.csv yet. This said
+    _cull/ for any shoot without a raw/, so a flat shoot with only cull/, and
+    every new empty one, was sent to a folder nothing else looks in - the
+    fork that left a stray _cull/ beside the dog shoot. The name stays
+    because a dozen callers use it."""
+    return library.paths(shoot).cull
 
 
 def exported_frames(shoot: Path) -> set[str]:
@@ -691,7 +701,7 @@ def exported_frames(shoot: Path) -> set[str]:
         return _EXPORTED[key]
     import taste
     at = taste.exported_at()
-    raw = shoot / "raw" if (shoot / "raw").is_dir() else shoot
+    raw = library.paths(shoot).raw
     names = [r["file"] for r in _rows(cull_dir(shoot))]
     if not names:
         names = [p.name for p in raw.iterdir() if p.suffix.lower() in RAW_EXTS] if raw.is_dir() else []
@@ -1583,6 +1593,73 @@ def _check_exposure(new: dict, measured_here: bool) -> tuple[list[str], bool]:
     return out, False
 
 
+def _check_tone(new: dict, now: dict, measured_here: bool) -> tuple[list[str], bool]:
+    """Whether the candidate's per-frame brightness, face lightness and
+    contrast (taste.learn_tone) may replace the ones in use.
+
+    Each is a target a sidecar is written toward, so it is gated like the
+    white balance, in the same three steps and for the same reasons
+    (_check_wb says them at length):
+
+    1. ITS OWN BAR, from its own counts: a target marked used must carry a
+       held-out error at least taste.TONE_MIN_GAIN under the rule's on the
+       same frames, and a sign test under taste.TONE_P. learn_tone marks a
+       target used only when it clears exactly this, so on a candidate
+       fitted here it never fires; it is for a candidate that came by a
+       door that did no fitting. One carrying no counts at all waits for a
+       run when it came from outside, and is held when it was fitted here,
+       because a fit made here always carries them.
+    2. WHAT IT STOPS DOING: a target the one in use takes from his exports
+       and this one hands back to the constants is a change to every frame
+       like it, said and held for him to look at, as a white balance it
+       would stop setting is.
+    3. AGAINST THE ONE IN USE, like for like (taste.tone_against_live): both
+       arms refitted and held out by the same groups, scored on the frames
+       that taught the one in use, only the training pool differing; held
+       where the candidate's error is more than taste.TONE_LIVE_TOL worse.
+
+    Returns the reasons to hold it, and whether it was held for want of a
+    measurement rather than on one."""
+    import taste
+    out: list[str] = []
+    unmeasured = False
+    for key in taste.TONE_TARGETS:
+        e, was = new.get(key) or {}, now.get(key) or {}
+        what = taste.TONE_WORDS[key]
+        if was.get("used") and not e.get("used"):
+            out.append(f"it would stop taking each frame's {what} from your exports, which the one in use does"
+                       + (f" ({e['why']})" if e.get("why") else ""))
+            continue
+        if not e.get("used"):
+            continue
+        need = ("mae", "baseline_mae", "wins", "losses")
+        if any(e.get(k) is None for k in need):
+            if not measured_here:
+                unmeasured = True
+                continue
+            out.append(f"it would take each frame's {what} from your exports and carries no held-out count "
+                       f"against the rule")
+            continue
+        mae, base = float(e["mae"]), float(e["baseline_mae"])
+        p = taste._sign_p(int(e["wins"]), int(e["losses"]))
+        if mae > (1.0 - taste.TONE_MIN_GAIN) * base or p >= taste.TONE_P:
+            out.append(f"its {what} from your exports has not earned the place of the rule: on frames from "
+                       f"{'shoots' if e.get('held_out', 'shoot') == 'shoot' else 'scenes'} it had not seen it is "
+                       f"closer to your export on {int(e['wins'])} and further on {int(e['losses'])}")
+    for key, a in ((new.get("against_live") or {}).items()):
+        if key not in taste.TONE_TARGETS or not isinstance(a, dict):
+            continue
+        if float(a.get("new") or 0) > float(a.get("now") or 0) * (1.0 + taste.TONE_LIVE_TOL):
+            fmt = "{:.2f}" if key == "spread_ratio" else "L* {:.1f}"
+            out.append(f"on the {int(a.get('frames') or 0)} frames that taught the one in use, both asked only "
+                       f"about frames they had not seen, its {taste.TONE_WORDS[key]} is off your exports by "
+                       f"{fmt.format(float(a['new']))} where the one in use's is off by {fmt.format(float(a['now']))}")
+    if unmeasured and not out:
+        return (["it would take each frame's brightness or contrast from your exports and nothing here has "
+                 "measured it against the rule on your photographs yet: the next learning run checks it"], True)
+    return out, False
+
+
 def _exposure_used_words(model: dict | None) -> str:
     """The clause that says where a starting edit chooses the exposure type
     itself, or '' where it chooses it nowhere. Said in the check's sentence
@@ -1944,7 +2021,9 @@ def check_edit(candidate: dict, live: dict | None, measured_here: bool = False, 
     why += wb_why
     ex_why, ex_unchecked = _check_exposure(candidate, measured_here)
     why += ex_why
-    unchecked = unchecked or ex_unchecked
+    tone_why, tone_unchecked = _check_tone(candidate.get("tone") or {}, live.get("tone") or {}, measured_here)
+    why += tone_why
+    unchecked = unchecked or ex_unchecked or tone_unchecked
     # frames_now and frames_new are the two counts compared, both by today's
     # rule; what each version counted when it was learned, and how the count
     # was made again, are kept beside them.
@@ -1973,6 +2052,13 @@ def check_edit(candidate: dict, live: dict | None, measured_here: bool = False, 
     own = _exposure_used_words(candidate)
     if own:
         passed += " " + own
+    tone = candidate.get("tone") or {}
+    import taste
+    if any((tone.get(k) or {}).get("used") for k in taste.TONE_TARGETS):
+        # Said when it passes, for the same reason the exposure type is: a
+        # change to what his sidecars aim at that the page did not mention
+        # would be one he could not trace.
+        passed += " " + taste.tone_sentence(tone)
     # str.capitalize() lowercases everything after the first letter, and a
     # reason can now carry the name he gave a shoot: it turned "Emma and Tom,
     # the roof" into "emma and tom, the roof" in the one line he reads.
@@ -2791,8 +2877,7 @@ _LOCAL_RAW: dict[str, tuple[tuple, bool]] = {}
 def _raw_folder(shoot: Path) -> Path:
     """Where this shoot's photographs are: its own raw/, or the shoot folder
     itself for the flat shape (frames lying loose in it, no raw/)."""
-    d = shoot / "raw"
-    return d if d.is_dir() else shoot
+    return library.paths(shoot).raw
 
 
 def photographs_here(shoot: Path) -> bool:
@@ -2849,8 +2934,13 @@ def _fingerprint(shoot: Path) -> dict:
     lab = decision_path(cull, "labels.json")
     dops = 0
     newest = 0
-    for d in ("raw", "edit", "cull/picks"):
-        folder_ = shoot / d
+    # The RAW folder the one resolver names, not a literal raw/: a flat
+    # shoot's sidecars lie loose beside its RAWs, and globbing <shoot>/raw
+    # counted none of them, so finishing a flat shoot never changed its
+    # fingerprint and never asked to be learned from. picks/ is the cull's,
+    # wherever the cull is.
+    where = library.paths(shoot)
+    for folder_ in (where.raw, where.edit, where.picks):
         if folder_.is_dir():
             for p in folder_.glob("*.dop"):
                 dops += 1

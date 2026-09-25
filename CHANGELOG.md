@@ -1,5 +1,57 @@
 # Changelog
 
+## Unreleased
+
+Every frame's starting edit now carries its own color: flatter frames get
+more Vibrancy (toward the ×1.10–1.15 lift preference studies find), vivid or
+clipping frames none, skies and foliage move toward their preferred colors,
+and skin stays under its published ceiling. How far a DxO slider moves color
+is an estimate, and each frame's note says so. A face mask now only nudges:
+it is written for a face at least ¾ stop short and lifts it at most half a
+stop.
+
+Exposure now does something on every frame. A frame with no face has its
+midtones taken toward middle grey in daylight and a lower target as the light
+falls, so night stays night; a face under the published band is lifted
+globally toward the band's middle, never past L* 58. Every lift stops at the
+highlights' headroom measured on the RAW, at 1.5 EV, and before the noise at
+the frame's ISO would double past 12,800; a face that still needs more gets a
+gentle mask.
+
+Where a frame's exposure and contrast aim is now learned from your finished
+exports. Learning reads each export's median lightness, its tonal spread and
+its largest face's lightness, and fits a small model for each of the three
+from what the camera and the RAW show: the light level, ISO, how bright and
+how spread the camera's frame is, whether there is a face and how light it
+is, and the highlight headroom. A model is used only when, tested on shoots it
+never saw, it lands at least 10% closer to your exports than the built-in
+rules on the same frames, and closer on more frames than chance would give.
+Otherwise the rules decide, as before. A frame with no face aims its midtones
+at the predicted lightness. A face aims at its predicted lightness, held
+inside the published band and never past L* 58. The S-curve's strength is
+solved per frame to give the predicted spread. Every limit on a lift still
+applies. Each frame's note says whether your exports or a rule set its aim,
+with the held-out error beside the rule's. The learning report and the
+learning page name what is learned, and the check holds a new version whose
+model is worse than the one in use on the same frames. The first learning run
+reads each export's tones once, and remeasures each finished frame whose RAW
+is on this Mac once to record its light level and headroom.
+
+Every frame's note now reports how colorful the camera's rendering is and
+where any sky or foliage sits against preferred memory colors, and the scene
+notes read the room's grey with faces left out. Skin and grey are measured at
+full precision instead of whole CIELAB units, the camera frame and your
+exports read a face on the same patch, and the white balance model can use
+the camera's green–magenta reading once every frame it learns from has one.
+Nothing else a sidecar carries changes.
+
+Every command now finds a shoot's folders by one rule, and takes the shoot,
+its `raw/` or its `cull/`: the RAWs in `raw/` or loose in the shoot, the cull
+in whichever of `cull/` and an old `_cull/` holds cull.csv (anything new is
+`cull/`). A frame the cull named by its camera JPEG gets its sidecar beside
+its RAW (`TSC04016.ARW.dop`) rather than a `.jpg.dop` beside nothing; existing
+orphans are counted and left in place.
+
 ## 0.1.5
 
 The app now displays **FirstEdit** in its windows, menus and About panel.

@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import library  # noqa: E402
 
 # Where a sidecar goes when gather will not overwrite it and will not throw it
 # away either. Beside the decisions, because that is what a sidecar holds, and
@@ -49,14 +50,14 @@ def _block(text: str, name: str) -> str:
 
 
 def cull_of(shoot: Path, raw: Path) -> Path:
-    """This shoot's cull folder: whichever is on disk, else `cull/` beside the
-    frames. A flat folder's cull is <shoot>/cull, which is where library.py and
-    reclaim.py both look; `_cull` is the old fork's name and is still read
-    wherever one is on a disk."""
-    for name in ("cull", "_cull"):
-        if (shoot / name).is_dir():
-            return shoot / name
-    return shoot / "cull"
+    """This shoot's cull folder, by the one rule (library.cull_dir): the one
+    that holds cull.csv, then whichever of cull/ and _cull/ is on disk, else
+    cull/. `_cull` is the old fork's name and is still read wherever one is
+    on a disk. This took whichever folder existed, cull/ first, so a flat
+    shoot whose cull was in _cull/ and which had been given an empty cull/
+    by some other command was "not culled yet" here with its cull.csv
+    sitting beside it."""
+    return library.paths(shoot).cull
 
 
 def _set_aside(cull: Path, src: Path, whose: str) -> Path:
@@ -328,9 +329,10 @@ def _build(shoot: Path, fresh: bool) -> tuple[Path, dict]:
     One implementation, not two: the command and the studio's Open in PhotoLab
     button build the same folder, and the second copy of this had neither the
     refusal below nor the sidecars set aside."""
-    shoot = Path(shoot).expanduser().resolve()
-    raw = shoot / "raw" if (shoot / "raw").is_dir() else shoot
-    cull = cull_of(shoot, raw)
+    # Whichever of the shoot's folders was named (library.paths): `pl gather
+    # <shoot>/raw` gathers the shoot, and does not build raw/edit/.
+    where = library.paths(Path(shoot).expanduser().resolve())
+    shoot, raw, cull = where.shoot, where.raw, where.cull
     if not (cull / "cull.csv").exists():
         raise FileNotFoundError("this shoot has not been culled yet")
     files = keepers(cull)

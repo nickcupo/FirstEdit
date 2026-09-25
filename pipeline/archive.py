@@ -79,6 +79,7 @@ sys.path.insert(0, str(HERE))
 
 from common import (RAW_EXTS, decision_path, for_the_app, human, stop_cleanly_on_sigterm,  # noqa: E402
                     write_json_atomic)
+import library  # noqa: E402
 
 # The flag macOS sets on a file whose bytes have been evicted to the cloud.
 # sys/stat.h: SF_DATALESS. There is no constant for it in Python's stat module.
@@ -301,13 +302,16 @@ def parts(shoot: Path) -> tuple[Path, Path]:
     manifest and the answer-key lookup into a folder nothing else in this
     pipeline reads, so `expire` would have found no selects.json and `push`
     would have minted a second _cull/ the first time it wrote. An existing
-    _cull/ is still honoured, because one may yet be on a disk somewhere."""
-    shoot = Path(shoot).expanduser().resolve()
-    raw = shoot / "raw" if (shoot / "raw").is_dir() else shoot
-    if raw.name == "raw":
-        return raw, shoot / "cull"
-    legacy = shoot / "_cull"
-    return raw, legacy if legacy.is_dir() else shoot / "cull"
+    _cull/ is still honoured, because one may yet be on a disk somewhere.
+
+    Both answers are library.paths' now, the one rule. This had its own: a
+    flat shoot took _cull/ whenever it existed, even beside a cull/ that
+    held the cull.csv, so a flat shoot with both got a different cull here
+    than from every other command. And it may be handed the shoot's raw/ or
+    cull/ as well as the shoot, as every command may: given raw/ it used to
+    answer raw/cull, a folder inside the originals."""
+    p = library.paths(Path(shoot).expanduser().resolve())
+    return p.raw, p.cull
 
 
 def originals(raw: Path) -> list[Path]:
@@ -1141,6 +1145,13 @@ def main() -> int:
     if not p.is_dir():
         print(f"  no such shoot: {a.shoot}")
         return 1
+    # The shoot itself, whichever of its folders was named (library.paths),
+    # the same shoot parts() answers for. parts() re-roots raw/ and cull/ to
+    # it, and every other path here (dest_for's folder in iCloud, the
+    # manifest's "shoot", the names pipeline_name keeps) is built from this
+    # one: handed <shoot>/raw and left as it was, a push went to ARCHIVE/raw/
+    # while being recorded in the real shoot's manifest.
+    p = library.paths(p.resolve()).shoot
     return {"status": lambda: show_status(p),
             "push": lambda: push(p, a.apply, a.force),
             "drop": lambda: drop(p, a.apply),

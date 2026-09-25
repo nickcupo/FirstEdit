@@ -567,3 +567,105 @@ def test_a_frame_of_his_that_was_left_alone_is_named(tmp_path):
     presets.write_dops(raw, tmp_path / "out", [{"file": "TSC05691.ARW", "rating": "3"}],
                        "Cull test", _PRESET, ["Scene 01"], left_alone=left)
     assert left == ["TSC05691"] and dop.read_text() == before
+
+
+# ------------------------------------------- a cull that named the camera JPEG
+
+def _lounge(tmp_path, flat: bool = False) -> Path:
+    """A shoot whose cull.csv names the camera JPEG (2026-09-12-lounge's says
+    TSC04016.jpg) while the RAW beside it is TSC04016.ARW. Returns the RAW
+    folder, the one build and write_dops are handed."""
+    shoot = tmp_path / "2026-09-12-lounge"
+    raw = shoot if flat else shoot / "raw"
+    raw.mkdir(parents=True)
+    (shoot / "cull").mkdir()
+    (raw / "TSC04016.ARW").write_bytes(b"RAW")
+    presets._STAMP.pop(raw, None)
+    return raw
+
+
+_STANDARD_TONES = {"TSC04016.jpg": {"_base": "standard"}, "TSC09999.jpg": {"_base": "standard"}}
+
+
+@pytest.mark.parametrize("flat", [False, True])
+def test_a_frame_the_cull_named_by_its_jpeg_gets_its_raws_sidecar(tmp_path, capsys, flat):
+    """The sidecar was built at shoot / r["file"], so a cull that named the
+    JPEG wrote TSC04016.jpg.dop beside nothing and the RAW PhotoLab opens got
+    none. It goes beside the RAW, named for it and saying so inside; and a
+    frame with neither a RAW of its number nor the file the cull named gets
+    nothing, said once."""
+    raw = _lounge(tmp_path, flat)
+    rows = [{"file": "TSC04016.jpg", "rating": "3"}, {"file": "TSC09999.jpg", "rating": "3"}]
+    assert presets.write_dops(raw, tmp_path / "out", rows, "Cull test", _PRESET, ["Scene 01"], tones=_STANDARD_TONES) == 1
+    dop = raw / "TSC04016.ARW.dop"
+    assert re.findall(r'^\t+Name = "([^"]*)",$', dop.read_text(), re.M) == ["TSC04016.ARW"]
+    assert sorted(p.name for p in tmp_path.rglob("*.dop")) == ["TSC04016.ARW.dop"]      # no .jpg.dop, and nothing for TSC09999
+    out = capsys.readouterr().out
+    assert out.count("got no sidecar") == 1 and "1 frame got no sidecar (TSC09999.jpg)" in out, out
+    # And the measuring reads the RAW, where there is one, and the old path where not.
+    assert presets.frame_file(raw, "TSC04016.jpg") == raw / "TSC04016.ARW"
+    assert presets.frame_file(raw, "TSC09999.jpg") == raw / "TSC09999.jpg"
+
+
+def test_a_frame_named_by_its_jpeg_finds_his_copy_by_the_raws_name(tmp_path):
+    raw = _lounge(tmp_path)
+    his = raw / "TSC04016.ARW.dop"
+    his.write_text(_with_overrides("\t\t\t\t\tExposureBias = -0.35,"))
+    taste._HANDS.clear()
+    assert presets.newest_hand(raw, "TSC04016.jpg") == his
+    left: list = []
+    presets.write_dops(raw, tmp_path / "out", [{"file": "TSC04016.jpg", "rating": "3"}], "Cull test", _PRESET,
+                       ["Scene 01"], tones=_STANDARD_TONES, left_alone=left)
+    assert left == ["TSC04016"] and "ExposureBias = -0.35," in his.read_text()
+
+
+def _orphan(raw: Path, text: str) -> Path:
+    orphan = raw / "TSC04016.jpg.dop"
+    orphan.write_text(text.replace('Name = "TSC05691.ARW"', 'Name = "TSC04016.jpg"'))
+    return orphan
+
+
+def test_an_orphan_of_his_is_read_as_the_raws_copy_and_left_where_it_is(tmp_path, capsys):
+    """Earlier runs left TSC04016.jpg.dop beside nothing. One carrying his hand
+    is the frame's hand copy until the RAW has a sidecar of its own: left
+    alone without --force, and under it the RAW's sidecar is written from it,
+    his edit kept. The orphan is never deleted, moved or rewritten."""
+    raw = _lounge(tmp_path)
+    orphan = _orphan(raw, _with_overrides("\t\t\t\t\tExposureBias = -0.35,"))
+    before = orphan.read_bytes()
+    left: list = []
+    rows = [{"file": "TSC04016.jpg", "rating": "3"}]
+    presets.write_dops(raw, tmp_path / "out", rows, "Cull test", _PRESET, ["Scene 01"], tones=_STANDARD_TONES, left_alone=left)
+    assert left == ["TSC04016"] and not (raw / "TSC04016.ARW.dop").exists()
+    out = capsys.readouterr().out
+    assert "1 sidecar named for a camera JPEG (TSC04016.jpg.dop)" in out and "left in place" in out, out
+    assert "1 carries your own edits" in out
+    presets.write_dops(raw, tmp_path / "out", rows, "Cull test", _PRESET, ["Scene 01"], tones=_STANDARD_TONES, force=True)
+    after = (raw / "TSC04016.ARW.dop").read_text()
+    assert "ExposureBias = -0.35," in after
+    assert re.findall(r'^\t+Name = "([^"]*)",$', after, re.M) == ["TSC04016.ARW"]
+    assert orphan.read_bytes() == before
+    assert "named for a camera JPEG" not in capsys.readouterr().out          # said once for the run
+
+
+def test_an_orphan_the_pipeline_wrote_is_not_his_and_is_not_used(tmp_path, capsys):
+    raw = _lounge(tmp_path)
+    orphan = _orphan(raw, PHOTOLAB_SIDECAR)
+    before = orphan.read_bytes()
+    left: list = []
+    presets.write_dops(raw, tmp_path / "out", [{"file": "TSC04016.jpg", "rating": "3"}], "Cull test", _PRESET,
+                       ["Scene 01"], tones=_STANDARD_TONES, left_alone=left)
+    assert left == [] and (raw / "TSC04016.ARW.dop").exists()
+    assert "SomethingNewInPhotoLab11" not in (raw / "TSC04016.ARW.dop").read_text()      # built fresh, not from the orphan
+    assert orphan.read_bytes() == before
+    out = capsys.readouterr().out
+    assert "not used and was left in place" in out and "your own edits" not in out, out
+
+
+def test_another_editors_sidecar_goes_beside_the_raw_too(tmp_path):
+    raw = _lounge(tmp_path)
+    rows = [{"file": "TSC04016.jpg", "rating": "3"}, {"file": "TSC09999.jpg", "rating": "3"}]
+    skipped: list = []
+    assert presets.write_for_editor(raw, rows, "Cull 01", {}, [], "darktable", quiet=True, no_raw=skipped) == 1
+    assert (raw / "TSC04016.ARW.xmp").exists() and not (raw / "TSC04016.jpg.xmp").exists()
+    assert skipped == ["TSC09999.jpg"]

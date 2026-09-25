@@ -26,6 +26,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from common import RAW_EXTS, decision_path, parse_shot_at, write_json_atomic  # noqa: E402
+import library  # noqa: E402
 
 # The neutral starting edit that ships beside this file: no venues, no ranker,
 # so a checkout and a fresh install start from DxO's own camera-body rendering
@@ -90,7 +91,36 @@ MIN_GAIN = 0.05       # a model must beat the median by this much to be used
 # pixels, with the face colour when there is a face and without it when there is
 # not. A model is kept only when it beats always-AsShot on frames from scenes it
 # never saw.
+#
+# These eight are the LEGACY row, and they stay exactly as they are: every
+# white balance model already stored - the one in use included - is ten
+# weights against _wb_row over this list, in this order, and a model is
+# nothing but its weights against its row.
 WB_FEATS = ["kelvin", "cast_a", "cast_b", "light_chroma", "frame_L", "range", "face_hue", "face_L"]
+# The camera's green-magenta reading of the light (presets.camera_wb_from_raw),
+# which is the axis a Fluo decision is actually about and the one kelvin is
+# blind to. It joins the eight above in a fit ONLY when every labelled frame
+# that fit is made on carries it, and it has no missing-flag.
+#
+# Why all or nothing, when the face values get a flag and are used where
+# they are present. A face is missing because nobody is in the frame, which
+# is a fact about the frame. wb_green is missing because the frame was
+# measured before it was kept: the store measures a frame again only when
+# his sidecar changes or MEASURE_SCHEMA moves, and never once its RAW is
+# archived. (MEASURE_SCHEMA is deliberately not bumped for it. A new key
+# changes what no number already stored means, and a bump would mark every
+# archived shoot's frames as older for nothing.) So which frames lack it is
+# a fact about WHICH SHOOTS - and a shoot is a venue, and a venue is very
+# nearly its class: the finished action venue holds 293 AsShot, one
+# eyedropper and no Fluo. A flag, or a 0 where it is missing, would hand the
+# fit a column that says "this came off an older or archived shoot", which
+# predicts Fluo through the venue and not through the light, and holding out
+# by scene cannot catch it, because a held-out scene carries the same flag
+# as the rest of its shoot. So a fit uses it where it is on every frame and
+# fits exactly as before where it is not; the model records which list it
+# used (its "features"), and wb_call builds each frame's row from that list
+# and nothing else.
+WB_GREEN = "wb_green"
 WB_MIN_AUC = 0.70     # held out by scene; below this the decision is not evidence, it is noise
 # Decisions of one named preset before it is a class to learn from, and
 # before a venue hands its frames to the per-frame model at all. The same
@@ -252,11 +282,12 @@ def final_settings(text: str, his_choices_only: bool = False) -> dict:
 
 
 def _shoot_of(raw: Path) -> Path:
-    """The shoot a frame belongs to: raw/ and edit/ sit in it, cull/picks/ sits one deeper."""
+    """The shoot a frame belongs to: raw/ and edit/ sit in it, cull/picks/ sits one deeper
+    - or _cull/picks/, on an old flat shoot whose cull library.paths finds there."""
     d = raw.parent
     if d.name in ("raw", "edit"):
         return d.parent
-    if d.name == "picks" and d.parent.name == "cull":
+    if d.name == "picks" and d.parent.name in ("cull", "_cull"):
         return d.parent.parent
     return d
 
@@ -327,26 +358,19 @@ def shot_at_of(raw: Path) -> float:
     return _SHOT_AT[key].get(raw.stem, 0.0)
 
 
-_RAWS: dict[str, tuple[tuple, dict[str, Path]]] = {}
-
-
 def frame_raw(shoot: Path, stem: str) -> Path | None:
     """This frame's RAW, found by its number whatever its extension, if it is
     still here. cull.csv can name the camera JPEG the cull decoded
     (2026-09-12-lounge's says TSC04015.jpg), and looking for raw/TSC04015.jpg
-    found nothing beside raw/TSC04015.ARW."""
-    shoot = Path(shoot)
-    folders = [shoot / "raw", shoot, shoot / "edit", shoot / "cull" / "picks"]
-    stamp = tuple(p.stat().st_mtime_ns if p.is_dir() else 0 for p in folders)
-    got = _RAWS.get(str(shoot))
-    if not got or got[0] != stamp:
-        index: dict[str, Path] = {}
-        for folder in reversed(folders):         # raw/ last, so it wins
-            if folder.is_dir():
-                index.update({p.stem: p for p in folder.iterdir() if p.suffix.lower() in RAW_EXTS})
-        got = (stamp, index)
-        _RAWS[str(shoot)] = got
-    return got[1].get(stem)
+    found nothing beside raw/TSC04015.ARW.
+
+    library.frame_raw's answer, and its cache: this was a second copy of the
+    same index, kept under a second dict, looking in cull/picks/ where the
+    library looks in whichever cull the shoot really has. It takes a stem
+    where the library takes a name, so the stem is handed over as a name
+    whose last suffix is only there to be stripped: a stem with a dot in it
+    (DSC_0001.v2) would otherwise lose its last part to Path.stem and miss."""
+    return library.frame_raw(shoot, f"{stem}.raw")
 
 
 def shoot_day(shoot: Path) -> float:
@@ -502,8 +526,8 @@ def hand_copies(shoot: Path) -> dict[str, Path]:
     # read as untouched to the learner, and presets would have written over
     # the 98 edits of ducksAndDeadlifts once it asked this instead of its own
     # copy of the rule.
-    raw = shoot / "raw" if (shoot / "raw").is_dir() else shoot
-    folders = [raw, shoot / "edit", shoot / "cull" / "picks"]
+    where = library.paths(shoot)
+    folders = [where.raw, where.edit, where.picks]
     key = str(shoot)
     stamp = tuple(p.stat().st_mtime_ns if p.is_dir() else 0 for p in folders)
     got = _HANDS.get(key)
@@ -534,13 +558,15 @@ def hand_copies(shoot: Path) -> dict[str, Path]:
 def newest_hand(raw_dir: Path, name: str) -> Path | None:
     """The same answer for one frame, for a caller that has a folder and a
     frame name (presets.write_dops)."""
-    top = raw_dir.parent if raw_dir.name == "raw" else raw_dir
-    return hand_copies(top).get(name)
+    return hand_copies(library.shoot_root(raw_dir)).get(name)
 
 
 def _raw_of(shoot: Path, name: str) -> Path | None:
-    """Where this frame's RAW is, if it is still here."""
-    for p in (shoot / "raw" / name, shoot / name, shoot / "edit" / name, shoot / "cull" / "picks" / name):
+    """Where this frame's RAW is, if it is still here: by the exact name its
+    sidecar carries, in the folders library.paths names. Not by number
+    (library.frame_raw): a stray TSC04016.jpg.dop is not the ARW's hand."""
+    where = library.paths(shoot)
+    for p in (where.raw / name, where.shoot / name, where.edit / name, where.picks / name):
         if p.exists():
             return p
     return None
@@ -582,7 +608,34 @@ def venue_base(shoot: Path, default: str = "1 - DxO Style - Natural", only: set[
 # Bump it when any of those change what a number MEANS, and every kept
 # measurement of the old version is re-measured where its RAW is still here and
 # labelled as older where it is not. Do not bump it for a comment or a rename.
+#
+# Nor for reading the same number more finely. The colour readings moved
+# from OpenCV's 8-bit Lab, rounded to whole units, to float Lab
+# (presets.cielab), and that was checked against this rule before the
+# version was left alone: on 4,000 synthetic skin patches the old and new
+# face medians differ by at most 0.58 in a* and b* and by 0.01 on average,
+# the hue by 0.3 degrees on a typical face but either way (0.0005 on
+# average), and L* by 0.05 on average, an eighth of the old 0.39 step; over
+# every 8-bit colour the neutral mask takes in, a* and b* move by under a
+# thousandth on average. Same patch, same statistic, read to more
+# places, so a row kept from before still means what a new one does, only
+# coarser; its skin rows are read again whenever the export changes. The
+# largest face's face_*_big and face_lit_L did change patch at the same time
+# (presets.skin_patch), and that is not a bump either: the store keeps them,
+# but nothing reads them back out of it.
 MEASURE_SCHEMA = 1
+# Nor for keeping a reading the store did not keep before. These are the
+# RAW's readings a finished frame's row carries beside measure(): what the
+# exposure rule decides from (clip_any, kept since venue_exposure), and what
+# the tone model reads (the RAW's median luminance and highlight headroom,
+# linear_measure's; the light level and ISO off its EXIF, exif_light's). Each
+# is a new key that means what it means on the frame presets measures today,
+# so a row without one is not measured differently, only less: learn_edit
+# measures it once more where its RAW is on this Mac (the backfill), and
+# where it is not the row keeps teaching with that reading flagged missing.
+# The export's own tones (ex_L50, ex_spread; export_tones) are the same kind
+# of addition on the export side.
+RAW_READINGS = ("clip_any", "frame_Y", "headroom_ev", "lv", "iso")
 
 
 def sidecar_mark(f: Path) -> str:
@@ -816,16 +869,64 @@ def learn(samples: list[tuple[dict, dict]]) -> dict:
 _CACHE: tuple[Path, int, dict] | None = None
 
 
-def _wb_row(m: dict) -> list[float]:
-    """One frame's white-balance evidence, with a flag for each face value that
-    is missing, so a frame with nobody in it is judged on the light alone."""
+def _wb_row(m: dict, feats: list[str] | None = None) -> list[float]:
+    """One frame's white-balance evidence, in the order `feats` names it
+    (WB_FEATS when none is given), with a flag for each face value that is
+    missing, so a frame with nobody in it is judged on the light alone.
+
+    Over WB_FEATS this is, value for value and in the same order, the row
+    every model stored before wb_green existed was fitted on: ten numbers for
+    eight names, each of the two face values followed by its flag. It has to
+    stay that, because a stored model is ten weights and a mean and spread
+    per position, and a row that moved one value would score a frame with
+    the weights of another.
+
+    wb_green, where a list names it, has no flag and no fill: it is read off
+    the frame or this fails. A fit names it only when every frame carries it
+    (_wb_feats), and wb_call asks a frame that lacks it nothing at all, so a
+    failure here is a caller that skipped that check, which should be loud
+    rather than scored as a frame whose camera read the light as exactly
+    daylight-green."""
     fa, fb = m.get("face_a"), m.get("face_b")
     hue = math.degrees(math.atan2(fb, fa)) if fa is not None and fb is not None else None
     fl = m.get("face_L")
-    return [float(m.get("kelvin") or 0.0), float(m.get("cast_a") or 0.0), float(m.get("cast_b") or 0.0),
-            float(m.get("light_chroma") or 0.0), float(m.get("frame_L") or 0.0), float(m.get("range") or 0.0),
-            hue if hue is not None else 0.0, 0.0 if hue is None else 1.0,
-            fl if fl is not None else 0.0, 0.0 if fl is None else 1.0]
+    row: list[float] = []
+    for f in (WB_FEATS if feats is None else feats):
+        if f == "face_hue":
+            row += [hue if hue is not None else 0.0, 0.0 if hue is None else 1.0]
+        elif f == "face_L":
+            row += [fl if fl is not None else 0.0, 0.0 if fl is None else 1.0]
+        elif f == WB_GREEN:
+            row.append(float(m[WB_GREEN]))
+        else:
+            row.append(float(m.get(f) or 0.0))
+    return row
+
+
+def _has_green(m: dict) -> bool:
+    """Whether this frame carries the camera's green reading: present, and a
+    finite number. presets.camera_wb_from_raw stores None where it cannot
+    read one (a JPEG, a sensor that is not RGB, a body libraw has no daylight
+    balance for), and a row measured before it existed has no key at all;
+    neither is a reading."""
+    v = m.get(WB_GREEN)
+    if v is None or isinstance(v, bool):
+        return False
+    try:
+        return math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _wb_feats(ms: list[dict]) -> list[str]:
+    """The evidence a white balance fit over these frames may use: WB_FEATS,
+    with wb_green beside it only when EVERY one of them carries it (WB_GREEN
+    says why nothing less will do). Where it falls back it is the legacy
+    list exactly, so a fit that cannot use the green is the fit it always
+    was, down to the list it records."""
+    if ms and all(_has_green(m) for m in ms):
+        return WB_FEATS + [WB_GREEN]
+    return WB_FEATS
 
 
 def _logistic(X: np.ndarray, y: np.ndarray, l2: float = 1.0, iters: int = 3000, lr: float = 0.1) -> tuple[np.ndarray, float]:
@@ -855,17 +956,27 @@ def learn_wb(samples: list[tuple[dict, dict]]) -> dict:
     Held out by scene, never by frame: frames from one scene share the light, and
     a random split would be marking the answer key. The model is written only if
     it beats always-AsShot on scenes it never saw; otherwise the honest answer is
-    AsShot, and that is what predict_wb returns."""
-    rows, ys, grp = [], [], []
+    AsShot, and that is what predict_wb returns.
+
+    The camera's green reading is part of the evidence only when every frame
+    this fits on carries it (_wb_feats; WB_GREEN says why). Where one does
+    not, the fit is the one this always made, row for row, and "features"
+    says which of the two it was: that list is the model's row from then on."""
+    kept, ys, grp = [], [], []
     for m, s in samples:
         wb = str(s.get("WhiteBalanceRawPreset", "AsShot")).strip('"')
         if wb not in ("AsShot", "Fluo") or not m.get("kelvin"):
             continue                      # Cloudy once, a typed temperature once: not a decision to learn
-        rows.append(_wb_row(m))
+        kept.append(m)
         ys.append(1.0 if wb == "Fluo" else 0.0)
         grp.append(m.get("_group", "?"))
+    # Chosen over the frames actually fitted on, after the filter above: a
+    # JPEG with no kelvin, or a Cloudy frame, is not in the fit, and the
+    # green it lacks is not a reason to leave the green out of it.
+    feats = _wb_feats(kept)
+    rows = [_wb_row(m, feats) for m in kept]
     n = len(rows)
-    out: dict = {"n": n, "n_fluo": int(sum(ys)), "features": WB_FEATS}
+    out: dict = {"n": n, "n_fluo": int(sum(ys)), "features": feats}
     if n < 25 or sum(ys) < WB_MIN_CLASS or n - sum(ys) < WB_MIN_CLASS:
         out["note"] = "too few decisions to learn from"
         return out
@@ -896,7 +1007,9 @@ def learn_wb(samples: list[tuple[dict, dict]]) -> dict:
     # inside it. The camera's kelvin orders frames the way DxO's scale does
     # and is never written; Fluo at DxO's nominal 4000 K warms a 3054 K
     # frame and would cool a 4145 K one, which is not the decision learned.
-    ks = [r[0] for r, yy in zip(rows, ys) if yy > 0]
+    # Read off the frames rather than off row[0]: the same numbers, and they
+    # stay the kelvin whichever list the row was built from.
+    ks = [float(m["kelvin"]) for m, yy in zip(kept, ys) if yy > 0]
     out["kelvin_range"] = [round(min(ks)), round(max(ks))]
     return out
 
@@ -910,16 +1023,23 @@ def learn_wb(samples: list[tuple[dict, dict]]) -> dict:
 
 def _wb_labelled(samples: list[tuple[dict, dict]]) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int]]:
     """The frames learn_wb would learn from: rows, labels, scene groups, and
-    where each came from in samples."""
-    rows, ys, grp, at = [], [], [], []
+    where each came from in samples.
+
+    The rows are built from the evidence learn_wb would use on these same
+    frames (_wb_feats over all of them): with the camera's green where every
+    one carries it, without it where any does not. One matrix for every arm
+    a caller fits on it, so no arm can be handed evidence another was not."""
+    kept, ys, grp, at = [], [], [], []
     for i, (m, s) in enumerate(samples):
         wb = str(s.get("WhiteBalanceRawPreset", "AsShot")).strip('"')
         if wb not in ("AsShot", "Fluo") or not m.get("kelvin"):
             continue
-        rows.append(_wb_row(m))
+        kept.append(m)
         ys.append(1.0 if wb == "Fluo" else 0.0)
         grp.append(m.get("_group", "?"))
         at.append(i)
+    feats = _wb_feats(kept)
+    rows = [_wb_row(m, feats) for m in kept]
     return np.array(rows), np.array(ys), np.array(grp), at
 
 
@@ -993,6 +1113,20 @@ def wb_against_live(samples: list[tuple[dict, dict]], shoots_of: list[Path], liv
     trained on frames the live model never saw - which lends the live arm the
     candidate's own advantage and biases the comparison against the
     candidate, in the one clause that exists to hold a candidate back.
+
+    THE EVIDENCE BOTH ARMS SEE. One matrix (_wb_labelled), so both arms are
+    fitted on the same columns: the camera's green reading where every
+    labelled frame here carries it, which is exactly when the candidate
+    itself was fitted with it, and the legacy eight where any does not. The
+    one in use may never have had the green - every model before it did not
+    - and its arm is lent it all the same. That is deliberate, and it is the
+    same rule as above: this measures what the POOL is worth, and a column
+    that only one arm could see would be a second difference folded into
+    the first. Whether the green earns its place is asked where the
+    candidate is fitted, against always-AsShot on scenes it never saw
+    (learn_wb), and per venue where it ships (wb_where_used). Here, lending
+    it to the live arm is what keeps the green's worth, or its cost, from
+    being credited to the pool.
 
     Returns None when the comparison cannot be made honestly - nothing in
     use, nothing recorded on it saying what taught it, or none of its frames
@@ -1069,7 +1203,14 @@ def wb_where_used(mod: dict, samples: list[tuple[dict, dict]], shoots_of: list[P
             if truth not in ("AsShot", "Fluo") or not m.get("kelvin"):
                 continue
             n += 1
-            right += wb_call(wb, m) == truth
+            # Scored as what presets would write: a model with nothing to say
+            # leaves the frame as the camera shot it (presets.frame_tones writes
+            # a name only when there is one). Every frame here has a kelvin, and a
+            # model fitted with the camera's green was fitted on these same
+            # frames only because each carries it, so "nothing to say" does not
+            # happen on the frames learn_edit hands this; the reading is here so
+            # the count stays the sidecars' count if it ever does.
+            right += (wb_call(wb, m) or "AsShot") == truth
             asshot += truth == "AsShot"
             if sh.name not in names:
                 names.append(sh.name)
@@ -1126,6 +1267,24 @@ def wb_call(wb: dict, m: dict) -> str | None:
         # is missing, and standardised as 0 it reads as light warmer than any
         # the photographer shot, which called Fluo at p=1.0 whatever the frame showed.
         return None
+    # The row is the one THIS model was fitted on, read off the model and
+    # never assumed: a model stored before the camera's green existed names
+    # the legacy eight (or, older still, names nothing) and is scored on
+    # exactly the ten numbers it always was; one fitted with the green is
+    # scored with it.
+    feats = list(wb.get("features") or WB_FEATS)
+    if any(f not in WB_FEATS and f != WB_GREEN for f in feats):
+        # Evidence this code does not know how to read, from some other
+        # version of it. A row built by guessing at it would be scored with
+        # weights that mean something else.
+        return None
+    if WB_GREEN in feats and not _has_green(m):
+        # Fitted with the green, asked about a frame that has none (measured
+        # before it was kept, or off a RAW it cannot be read from). The same
+        # case as no kelvin above: filled with anything, it is a reading the
+        # camera never made, so the model says nothing, and the frame is left
+        # as the camera shot it, which is what presets does with nothing.
+        return None
     rng = wb.get("kelvin_range")
     if rng and not (float(rng[0]) <= float(m["kelvin"]) <= float(rng[1])):
         # Outside the camera-kelvin range of the frames the name was chosen
@@ -1133,7 +1292,7 @@ def wb_call(wb: dict, m: dict) -> str | None:
         # photographer choose there, and the finished action venue at
         # 4100-4300 K sits well above the 2885-3282 K he chose Fluo in.
         return "AsShot"
-    z = (np.array(_wb_row(m)) - np.array(wb["mu"])) / np.array(wb["sd"])
+    z = (np.array(_wb_row(m, feats)) - np.array(wb["mu"])) / np.array(wb["sd"])
     p = 1 / (1 + math.exp(-float(z @ np.array(wb["w"]) + wb["b"])))
     return "Fluo" if p >= 0.5 else "AsShot"
 
@@ -1389,6 +1548,335 @@ def predict_exposure(entry: dict | None, m: dict) -> str | None:
         return None
 
 
+# ------------------------------------------------ brightness and contrast, per frame
+#
+# "These need to be dynamic based on ML models not just hard constants." The
+# exposure and the tone curve used to aim every frame at a constant: a
+# midtone L* by light level (presets.TARGET_BY_LV, a quarter stop darker in
+# daylight), a face at the band's middle capped at L* 58, an S-curve of 0.10
+# in daylight and 0.03 in low light. Those constants are inferences from the
+# literature and from FirstEditMobile, and his finished exports are a direct
+# record of where he actually puts each of the three on each frame. So each
+# is now a small model of what he delivered, fitted on the readings the
+# store keeps of his exports, and each replaces its constant only where it
+# predicts his exports better than the constant does on shoots it had not
+# seen, by a margin and by more than chance. The constants stay as the
+# fallback prior; every limit on how far a frame may move stays as it is.
+#
+# Three targets, each one number per frame, read off the export:
+#   L50          -- the median L* of the whole export (where his midtones sit);
+#   face_L       -- the largest face's L* in the export (export_face_L_one,
+#                   the reading the venues' face band was always made from);
+#   spread_ratio -- the export's L* p95 - p5 over the camera JPEG's: how much
+#                   wider (or flatter) he leaves the tones than the camera did,
+#                   which is what the S-curve's amplitude is solved for.
+# The evidence is what presets has on a new frame before anything is
+# written: the light (LV, ISO, from EXIF), the camera JPEG (its median, its
+# spread, its clipping, whether there is a face and how light it is) and the
+# RAW (its median luminance, its highlight headroom). presets.tone_evidence
+# builds it both here, from the store, and there, from the frame, so the two
+# cannot mean different things.
+TONE_TARGETS = ("L50", "face_L", "spread_ratio")
+TONE_BASE = ["lv", "log2_iso", "frame_L", "range", "clip", "face_L", "log2_frame_Y", "headroom_ev"]
+# Each reading and whether it was there: a frame with no face, or one whose
+# RAW or EXIF was never read, is filled with the fit's median and flagged,
+# so it is judged on what it has (face_L_known is "has a face").
+TONE_FEATS = [f for b in TONE_BASE for f in (b, f"{b}_known")]
+# Too few frames and a held-out MAE is noise; too few groups and "held out"
+# means one shoot scored by a fit on one other.
+TONE_MIN_FRAMES = 30
+TONE_MIN_GROUPS = 3
+# The bar, both halves of it. The held-out MAE must be at least 10% under
+# the rule's on the same frames (a model that is only as good as the
+# constants is a model nobody can read replacing a number anybody can), AND
+# closer to his export than the rule on more frames than chance would give
+# (the one-sided sign test venue_exposure uses, at the same 0.05): a lower
+# mean can come from a few frames where the rule is badly wrong while the
+# model is worse on most of them, and that is not a better target for the
+# next frame.
+TONE_MIN_GAIN = 0.10
+TONE_P = 0.05
+# How much worse than the one in use, on the frames that taught the one in
+# use, a candidate's tone model may be before the gate holds it
+# (learned._check_tone): the same frames and folds for both arms, so the
+# tolerance is only for the refit's own jitter.
+TONE_LIVE_TOL = 0.05
+# What a prediction may be, whatever the weights say: an export's median
+# between near-black and near-white, a face in the same, a spread between
+# half and twice the camera's. The frame's own guards (headroom, noise,
+# the band, TONE_C_MAX) bound it again downstream; these only stop a
+# weight extrapolated off the edge of the data from naming an absurd target.
+TONE_CLAMP = {"L50": (5.0, 95.0), "face_L": (5.0, 95.0), "spread_ratio": (0.5, 2.0)}
+TONE_WORDS = {"L50": "brightness", "face_L": "face lightness", "spread_ratio": "contrast"}
+
+
+def _tone_raw(ev: dict) -> dict:
+    """The evidence in the units the model reads: stops for ISO and the RAW's
+    luminance (a doubling is a doubling wherever it starts), the rest as
+    measured. None where the reading is missing."""
+    iso, fy = ev.get("iso"), ev.get("frame_Y")
+    return {"lv": ev.get("lv"), "log2_iso": math.log2(iso) if iso and iso > 0 else None,
+            "frame_L": ev.get("frame_L"), "range": ev.get("range"), "clip": ev.get("clip"),
+            "face_L": ev.get("face_L"), "log2_frame_Y": math.log2(fy) if fy and fy > 0 else None,
+            "headroom_ev": ev.get("headroom_ev")}
+
+
+def _tone_row(ev: dict, fill: dict) -> list[float]:
+    """One frame's row over TONE_FEATS, missing values at the fit's median
+    and flagged."""
+    raw = _tone_raw(ev)
+    row: list[float] = []
+    for b in TONE_BASE:
+        v = raw.get(b)
+        row += [float(v) if v is not None else float(fill.get(b, 0.0)), 0.0 if v is None else 1.0]
+    return row
+
+
+def _tone_clamp(key: str, v: float) -> float:
+    lo, hi = TONE_CLAMP[key]
+    return min(hi, max(lo, float(v)))
+
+
+def _tone_target(m: dict, key: str) -> float | None:
+    """His delivered value of one target on one finished frame, or None."""
+    if key == "L50":
+        v = m.get("_ex_L50")
+        return None if v is None else float(v)
+    if key == "face_L":
+        v = m.get("_ex_face_L")
+        return None if v is None else float(v)
+    sp, rng = m.get("_ex_spread"), (m.get("_tone") or {}).get("range")
+    if sp is None or rng is None or float(rng) <= 1.0:
+        return None
+    return float(sp) / float(rng)
+
+
+def _tone_scored(ev: dict, key: str) -> bool:
+    """Whether presets would use this target on this frame, which is where a
+    model of it is scored: the midtones only decide a frame with no face on
+    the RAW (a face frame is exposed for its face); a face on every frame
+    that has one; the spread wherever a curve is written at all (not past
+    presets.TONE_WIDE)."""
+    from presets import TONE_WIDE
+    if key == "L50":
+        return not ev.get("face_Y")
+    if key == "spread_ratio":
+        rng = ev.get("range")
+        return rng is not None and float(rng) <= TONE_WIDE
+    return True
+
+
+def _tone_design(samples: list[tuple[dict, dict]], shoots_of: list[Path], key: str) -> dict:
+    """Every finished frame that carries this target, as the model sees it:
+    rows, his values, the rule's values (presets.rule_tone), which frames it
+    is scored on, and the shoot and scene of each."""
+    from presets import rule_tone
+    evs, ys, base, scored, shoot, scene = [], [], [], [], [], []
+    for (m, _s), sh in zip(samples, shoots_of):
+        y = _tone_target(m, key)
+        ev = m.get("_tone")
+        if y is None or not ev:
+            continue
+        r = rule_tone(ev).get(key)
+        evs.append(ev)
+        ys.append(y)
+        base.append(np.nan if r is None else float(r))
+        scored.append(r is not None and _tone_scored(ev, key))
+        shoot.append(Path(sh).name)
+        scene.append(str(m.get("_scene") or m.get("_burst") or Path(sh).name))
+    fill = {}
+    raws = [_tone_raw(ev) for ev in evs]
+    for b in TONE_BASE:
+        vals = [r[b] for r in raws if r.get(b) is not None]
+        fill[b] = round(float(np.median(vals)), 6) if vals else 0.0
+    X = np.array([_tone_row(ev, fill) for ev in evs], dtype=float).reshape(len(evs), len(TONE_FEATS))
+    return {"X": X, "y": np.array(ys, dtype=float), "base": np.array(base, dtype=float),
+            "scored": np.array(scored, dtype=bool), "shoot": np.array(shoot), "scene": np.array(scene),
+            "fill": fill}
+
+
+def _tone_groups(d: dict) -> tuple[np.ndarray, str]:
+    """Held out BY SHOOT: a shoot is a venue and its light, and a fit asked
+    about a frame from a shoot it was trained on has seen that room's answer.
+    With fewer than TONE_MIN_GROUPS shoots, by scene (the cull's scene within
+    a shoot, one light and one moment), and the record says so."""
+    if len(set(d["shoot"].tolist())) >= TONE_MIN_GROUPS:
+        return d["shoot"], "shoot"
+    return d["scene"], "scene"
+
+
+def _tone_heldout(X: np.ndarray, y: np.ndarray, groups: np.ndarray, pool: np.ndarray, ev: np.ndarray,
+                  key: str) -> np.ndarray:
+    """venue_exposure's protocol for a number: every frame in `ev` predicted
+    by a ridge fitted on `pool` less that frame's group, standardised on
+    those training frames only. NaN where too little is left to fit on."""
+    out = np.full(len(y), np.nan)
+    for g in np.unique(groups[ev]):
+        te = ev & (groups == g)
+        tr = pool & (groups != g)
+        if tr.sum() < 8:
+            continue
+        mu, sd = X[tr].mean(0), X[tr].std(0)
+        sd[sd < 1e-9] = 1.0
+        w = _ridge((X[tr] - mu) / sd, y[tr])
+        pred = np.hstack([(X[te] - mu) / sd, np.ones((int(te.sum()), 1))]) @ w
+        out[te] = [_tone_clamp(key, v) for v in pred]
+    return out
+
+
+def _tone_one(d: dict, key: str) -> dict:
+    """One target: fitted, held out, scored against the rule, and kept only
+    if it clears the bar (TONE_MIN_GAIN and TONE_P)."""
+    n = len(d["y"])
+    groups, held_by = _tone_groups(d)
+    shoots = sorted(set(d["shoot"].tolist()))
+    out: dict = {"features": TONE_FEATS, "n": n, "shoots": len(shoots), "shoot_names": shoots,
+                 "held_out": held_by, "groups": int(len(set(groups.tolist()))), "used": False}
+    scored = d["scored"]
+    if n < TONE_MIN_FRAMES or int(scored.sum()) < TONE_MIN_FRAMES:
+        out["why"] = (f"{n} finished frame{'' if n == 1 else 's'} carry it, {int(scored.sum())} where it would "
+                      f"decide: too few to learn from (it needs {TONE_MIN_FRAMES})")
+        return out
+    if out["groups"] < TONE_MIN_GROUPS:
+        out["why"] = (f"its frames come from {out['groups']} {held_by}{'' if out['groups'] == 1 else 's'}: too few "
+                      f"to hold any out (it needs {TONE_MIN_GROUPS})")
+        return out
+    X, y, base = d["X"], d["y"], d["base"]
+    held = _tone_heldout(X, y, groups, np.ones(n, bool), scored, key)
+    ok = scored & ~np.isnan(held)
+    if int(ok.sum()) < TONE_MIN_FRAMES:
+        out["why"] = f"only {int(ok.sum())} of its frames could be held out: too few to judge it"
+        return out
+    em, eb = np.abs(held[ok] - y[ok]), np.abs(base[ok] - y[ok])
+    mae, bmae = float(em.mean()), float(eb.mean())
+    wins, losses = int((em < eb).sum()), int((em > eb).sum())
+    p = _sign_p(wins, losses)
+    out.update(scored=int(ok.sum()), mae=round(mae, 4), baseline_mae=round(bmae, 4),
+               wins=wins, losses=losses, p=round(p, 5))
+    unit = "" if key == "spread_ratio" else "L* "
+    fmt = (lambda v: f"{v:.2f}") if key == "spread_ratio" else (lambda v: f"{v:.1f}")
+    said = (f"on {int(ok.sum())} frames, each predicted by a fit that had not seen its {held_by}, it is off his "
+            f"exports by {unit}{fmt(mae)} where the rule is off by {unit}{fmt(bmae)}, closer on {wins} and further "
+            f"on {losses}")
+    if mae > (1.0 - TONE_MIN_GAIN) * bmae:
+        out["why"] = said + f": not {TONE_MIN_GAIN:.0%} better than the rule, so the rule stands"
+        return out
+    if p >= TONE_P:
+        out["why"] = said + f": closer on too few frames to be sure (sign test p {p:.3f}), so the rule stands"
+        return out
+    mu, sd = X.mean(0), X.std(0)
+    sd[sd < 1e-9] = 1.0
+    w = _ridge((X - mu) / sd, y)
+    out.update(used=True, why=said, fill=d["fill"], mu=[round(float(v), 6) for v in mu],
+               sd=[round(float(v), 6) for v in sd], w=[round(float(v), 6) for v in w[:-1]],
+               b=round(float(w[-1]), 6))
+    return out
+
+
+def learn_tone(samples: list[tuple[dict, dict]], shoots_of: list[Path]) -> dict:
+    """Per-frame brightness, face lightness and contrast, learned from his
+    finished exports: {target: {mu, sd, w, b, fill, features, n, shoots,
+    mae, baseline_mae, wins, losses, p, used, why}} over TONE_TARGETS.
+
+    Each sample's m carries "_tone" (presets.tone_evidence off the store's
+    row) and his delivered "_ex_L50", "_ex_spread", "_ex_face_L". A ridge on
+    standardised evidence, held out by shoot (by scene with fewer than
+    TONE_MIN_GROUPS shoots, and "held_out" says which), scored on the frames
+    where presets would use that target against the rule replayed on the
+    same frames (presets.rule_tone), and used only where it clears both
+    halves of the bar. Where it does not, "why" says by how much it missed,
+    and presets keeps the constant."""
+    return {key: _tone_one(_tone_design(samples, shoots_of, key), key) for key in TONE_TARGETS}
+
+
+def tone_call(entry: dict, ev: dict, key: str) -> float | None:
+    """What one target's model predicts for a frame (presets.tone_evidence),
+    or None where the model is not in use or was fitted on a row this code
+    does not build: weights read with a row they were not fitted on score a
+    frame with the meaning of another reading."""
+    if not (entry or {}).get("used") or entry.get("w") is None:
+        return None
+    if list(entry.get("features") or []) != TONE_FEATS:
+        return None
+    try:
+        z = (np.array(_tone_row(ev, entry.get("fill") or {})) - np.array(entry["mu"])) / np.array(entry["sd"])
+        v = float(z @ np.array(entry["w"]) + float(entry["b"]))
+    except (KeyError, ValueError, TypeError):
+        return None
+    if not math.isfinite(v):
+        return None
+    return _tone_clamp(key, v) if key in TONE_CLAMP else v
+
+
+def tone_words(entry: dict, key: str, v: float) -> str:
+    """Where a frame's target came from, in the words its note carries."""
+    k = int(entry.get("shoots") or 0)
+    by = "" if entry.get("held_out", "shoot") == "shoot" else ", held out by scene"
+    if key == "spread_ratio":
+        err = f"held-out error {float(entry.get('mae') or 0):.2f} vs rule {float(entry.get('baseline_mae') or 0):.2f}"
+        head = f"contrast from your exports: tones spread x{v:.2f}"
+    else:
+        err = f"held-out error {float(entry.get('mae') or 0):.1f} vs rule {float(entry.get('baseline_mae') or 0):.1f}"
+        head = f"{'brightness' if key == 'L50' else 'face'} from your exports: L* {v:.0f}"
+    return (f"{head} (learned on {int(entry.get('n') or 0)} frames, {k} shoot{'' if k == 1 else 's'}{by}; {err})")
+
+
+def tone_sentence(tone: dict | None) -> str:
+    """One line for the run and the dataset record: which of the three his
+    exports decide now, and for the rest, that the rule does."""
+    if not tone:
+        return ""
+    got = [TONE_WORDS[k] for k in TONE_TARGETS if (tone.get(k) or {}).get("used")]
+    rest = [TONE_WORDS[k] for k in TONE_TARGETS if not (tone.get(k) or {}).get("used")]
+    if not got:
+        return "Brightness, face lightness and contrast are still the rules': none learned from your exports beats them yet."
+    s = f"From your exports, per frame: {', '.join(got)}."
+    if rest:
+        s += f" Still by rule: {', '.join(rest)}."
+    return s
+
+
+def tone_against_live(samples: list[tuple[dict, dict]], shoots_of: list[Path], live: dict | None,
+                      tone: dict) -> dict | None:
+    """The candidate's tone models against the ones in use, ON THE SAME
+    FRAMES, IN THE SAME FOLDS, with only the training pool changing -- the
+    white balance's comparison (wb_against_live, whose docstring says why
+    nothing simpler is honest) made for a number instead of a class.
+
+    Per target that BOTH use: the frames scored are the ones that taught the
+    one in use (the shoots its dataset record names) where the target would
+    decide; each is predicted by a fit that never saw its group, one arm
+    trained on the one in use's pool and the other on the candidate's; the
+    two held-out MAEs are what learned._check_tone reads. A target only one
+    of them uses is not compared here: the candidate's own bar against the
+    rule covers one it adds, and the gate says so when it drops one.
+
+    None where no comparison can be made honestly: nothing in use, nothing
+    recorded on it saying what taught it, or no frame of it here."""
+    ltone = (live or {}).get("tone") or {}
+    taught = {str(s.get("shoot") or "") for s in (((live or {}).get("dataset") or {}).get("shoots") or [])} - {""}
+    if not ltone or not taught:
+        return None
+    out: dict = {}
+    for key in TONE_TARGETS:
+        if not (ltone.get(key) or {}).get("used") or not (tone.get(key) or {}).get("used"):
+            continue
+        d = _tone_design(samples, shoots_of, key)
+        groups, _ = _tone_groups(d)
+        was_pool = np.array([s in taught for s in d["shoot"].tolist()], dtype=bool)
+        if not was_pool.any() or was_pool.all():
+            continue                      # the candidate learned nothing the one in use had not, or they share nothing
+        ev = was_pool & d["scored"]
+        was = _tone_heldout(d["X"], d["y"], groups, was_pool, ev, key)
+        now = _tone_heldout(d["X"], d["y"], groups, np.ones(len(d["y"]), bool), ev, key)
+        ok = ev & ~np.isnan(was) & ~np.isnan(now)
+        if not ok.any():
+            continue
+        out[key] = {"frames": int(ok.sum()), "now": round(float(np.abs(was[ok] - d["y"][ok]).mean()), 4),
+                    "new": round(float(np.abs(now[ok] - d["y"][ok]).mean()), 4)}
+    return out or None
+
+
 # Written by PhotoLab 10 into Overrides when a file is merely opened,
 # imported or saved: the gain map and the crop flags, and whatever the Base
 # left out or holds in a form PhotoLab re-canonicalises: the white balance
@@ -1505,7 +1993,7 @@ def spread_written(shoot: Path) -> set[str]:
     if key not in _SPREAD:
         names: set[str] = set()
         try:
-            rec = json.loads(decision_path(shoot / "cull", "spread.json").read_text())
+            rec = json.loads(decision_path(library.paths(shoot).cull, "spread.json").read_text())
             for burst in rec.values():
                 for n in (burst.get("written") or []):
                     names.add(Path(str(n)).name)
@@ -1687,7 +2175,7 @@ def shoot_overrides(shoot: Path, min_n: int = 3, only: set[str] | None = None) -
     # "DeepRaw2RGBv7" on 198 frames and his 92 Fluo decisions included, so
     # what he actually chose there survives both gates intact.
     pipeline_wrote: dict[str, set[str]] = {}
-    rawdir = shoot / "raw" if (shoot / "raw").is_dir() else shoot
+    rawdir = library.paths(shoot).raw
     for f in sorted(rawdir.glob("*.dop"))[:400]:
         base = _block(f.read_text(errors="ignore"), "Base")
         for k, v in re.findall(r"^\s*([A-Za-z0-9_]+) = ([^\n{]+?),\s*$", base, re.M):
@@ -1827,6 +2315,30 @@ def export_face_L_one(stem: str, judge) -> float | None:
     return None
 
 
+def export_tones(stem: str) -> dict:
+    """Where his export of this frame put its tones: {"ex_L50": the median
+    L*, "ex_spread": L* p95 - p5}, or {} where there is no export to read.
+
+    Read the way presets.measure reads the camera JPEG those numbers are set
+    beside -- float CIELAB (presets.cielab) on the image at no more than
+    1800 px wide -- so the spread ratio learn_tone learns is one instrument
+    over two renderings, and not two instruments. These are the targets of
+    the tone model (learn_tone): what he delivered, frame by frame."""
+    f = export_path(stem)
+    if not f:
+        return {}
+    img = cv2.imread(f)
+    if img is None:
+        return {}
+    h, w = img.shape[:2]
+    if w > 1800:
+        img = cv2.resize(img, (1800, int(h * 1800 / w)), interpolation=cv2.INTER_AREA)
+    from presets import cielab
+    L = cielab(img)[0]
+    p5, p50, p95 = (float(v) for v in np.percentile(L, (5, 50, 95)))
+    return {"ex_L50": round(p50, 4), "ex_spread": round(p95 - p5, 4)}
+
+
 # What a frame carries into the venue's ranker: the cull's own measurements
 # per frame plus where it sits in its burst. Nothing here is a face target
 # or a threshold; the weights come from what he kept on a finished shoot.
@@ -1874,7 +2386,11 @@ def learn_ranker(shoot: Path, quality: dict[str, float] | None = None,
     # cull.csv stays in cull/: a cull rebuilds it. The answer key does not,
     # so it is asked for through decision_path and found in decisions/ after
     # `pl migrate`, symlink or no symlink.
-    cc, sel = shoot / "cull" / "cull.csv", decision_path(shoot / "cull", "selects.json")
+    # And both in the cull library.paths names, not a literal cull/: a flat
+    # shoot culled into _cull/ has no cull/cull.csv and taught the ranker
+    # nothing.
+    cull = library.paths(shoot).cull
+    cc, sel = cull / "cull.csv", decision_path(cull, "selects.json")
     if not cc.exists() or (kept is None and not sel.exists()):
         return None
     rows = list(csv.DictReader(cc.open()))
@@ -2046,7 +2562,7 @@ def sidecar_base_id(shoot: Path) -> str | None:
     so the Base they were measured under is recorded beside them and checked
     before they are used."""
     from presets import base_id
-    rawdir = shoot / "raw" if (shoot / "raw").is_dir() else shoot
+    rawdir = library.paths(shoot).raw
     seen: dict[str, int] = {}
     for f in sorted(rawdir.glob("*.dop"))[:200]:
         b = flat_block(f.read_text(errors="ignore"), "Base")
@@ -2313,6 +2829,24 @@ def report(mod: dict) -> str:
     L.append("")
     for k, e in mod["categorical"].items():
         L.append(f"  {k:<32}{e['n']:>4}   {e['value']!r} ({e['share']:.0%} of the photographer's edits)")
+    tone = mod.get("tone") or {}
+    if tone:
+        # Where each frame's brightness, face and contrast come from: his
+        # exports where that beat the rule held out, the rule where not, and
+        # why, in the numbers the gate used.
+        L.append("")
+        L.append("  per frame, from the photographer's exports (held-out error against the rule's, on the same frames):")
+        for k in TONE_TARGETS:
+            e = tone.get(k) or {}
+            if not e:
+                continue
+            fmt = "{:.2f}" if k == "spread_ratio" else "{:.1f}"
+            err = (f"{fmt.format(e['mae'])} vs {fmt.format(e['baseline_mae'])}"
+                   if e.get("mae") is not None and e.get("baseline_mae") is not None else "-")
+            L.append(f"     {TONE_WORDS[k]:<16}{int(e.get('n') or 0):>5} frames {int(e.get('shoots') or 0):>3} shoots   "
+                     f"{err:<14} {'used' if e.get('used') else 'rule'}")
+            if e.get("why"):
+                L.append(f"        {e['why']}")
     return "\n".join(L)
 
 
@@ -2400,16 +2934,26 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
         # actually on this Mac: a RAW that is a name in a folder with its bytes
         # in iCloud would be downloaded by the read, which a run he did not
         # ask to fetch anything must never do.
-        backfill = bool(same) and can and "clip_any" not in old and _bytes_here(t["raw"])
-        if same and old.get("export") == t["export"] and not backfill:
+        backfill = bool(same) and can and any(k not in old for k in RAW_READINGS) and _bytes_here(t["raw"])
+        # The export's own tones (export_tones), which the tone model learns
+        # from, read once for a row kept before they were, while the export
+        # is on this Mac: that needs the JPEG and nothing else, so it goes by
+        # the export pile and never costs a RAW read. A row that has the key
+        # -- even as None, an export that could not be read -- is not asked
+        # again, so this happens once.
+        tones_missing = bool(same) and "ex_L50" not in old and export_path(t["stem"]) is not None
+        if same and old.get("export") == t["export"] and not backfill and not tones_missing:
             continue
         if backfill:
             again += 1
-            # Measured before the store kept the sensor reading the exposure
-            # rule decides from. While the RAW is here it is measured once
-            # more, so the rule can be replayed on it for good; once the RAW
-            # has gone it stays as it was, and its venue's exposure is left
-            # to the rule (venue_exposure says so, and why).
+            # Measured before the store kept the sensor readings the exposure
+            # rule decides from (clip_any) or the tone model reads (the RAW's
+            # median and headroom, the light off its EXIF). While the RAW is
+            # here it is measured once more, so the rule can be replayed on
+            # it and the model can learn from it for good; once the RAW has
+            # gone it stays as it was: its venue's exposure is left to the
+            # rule (venue_exposure says so, and why), and the tone model
+            # reads it with those readings flagged as missing.
             todo.append((key, t))
         elif same:
             export_again.append((key, t))
@@ -2431,9 +2975,9 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
         # minutes where a run is otherwise about one. It reads his RAWs and
         # writes nothing beside them, and a frame measured once is not
         # measured again for this.
-        print(f"  {again} of those were measured before the store kept the sensor reading the exposure rule "
-              f"decides from, and are measured once more while their photographs are on this Mac; "
-              f"this happens once")
+        print(f"  {again} of those were measured before the store kept the sensor readings the exposure rule "
+              f"decides from and the brightness model learns from, and are measured once more while their "
+              f"photographs are on this Mac; this happens once")
     if len(want) < 20 and len(store) < 20:
         # Before the detectors are loaded: a machine with nothing finished on
         # it yet should not spend a minute of model loading to say so.
@@ -2472,6 +3016,11 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
         # still reading "288 of 288" from the last measuring mark, which is a
         # screen that says the machine has hung.
         total = len(todo) + len(export_again)
+        # The light each frame was taken in, off its RAW's EXIF, the way
+        # presets.frame_tones reads it for a new frame: one exiftool call for
+        # the lot, and a frame it cannot read simply has none.
+        from presets import exif_light
+        light = exif_light([str(t["raw"]) for _k, t in todo]) if todo else {}
         mark("exports", 0, max(1, total))
         for i, (key, t) in enumerate(todo):
             if i and (i % 25 == 0):
@@ -2487,6 +3036,12 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
             # L* itself, which is the venue's band.
             export_L = export_face_L_one(t["stem"], judge) if (exported and face_Y) else None
             sc, bu = scene_burst(t["shoot"], t["stem"])
+            lin = got["lin"] or {}
+            lit = light.get(str(t["raw"])) or {}
+            # What he delivered, for the tone model (learn_tone): None where
+            # there is no export to read, and kept as a key either way so the
+            # backfill never asks again.
+            tones = export_tones(t["stem"]) if exported else {}
             fresh.append({"key": key, "kind": "frame", "shoot": t["shoot"].name, "frame": t["name"], "stem": t["stem"],
                           "at": _stamp_now(), "schema": MEASURE_SCHEMA,
                           "sidecar": t["sidecar"], "export": t["export"],
@@ -2497,7 +3052,13 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
                           # the rule can be replayed on this frame after the
                           # RAW has gone (venue_exposure).
                           "clip_any": _round6((got["lin"] or {}).get("clip_any")),
-                          "subject_Y": _round6((got["lin"] or {}).get("subject_Y"))})
+                          "subject_Y": _round6((got["lin"] or {}).get("subject_Y")),
+                          # What the tone model reads off the RAW and its
+                          # EXIF (RAW_READINGS), and what it learns from the
+                          # export (export_tones).
+                          "frame_Y": _round6(lin.get("frame_Y")), "headroom_ev": _round6(lin.get("headroom_ev")),
+                          "lv": _round6(lit.get("lv")), "iso": _round6(lit.get("iso")),
+                          "ex_L50": tones.get("ex_L50"), "ex_spread": tones.get("ex_spread")})
         for j, (key, t) in enumerate(export_again):
             mark("exports", len(todo) + j, total)
             old = dict(store[key])
@@ -2510,6 +3071,8 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
             exported = is_exported(t["raw"] or t["shoot"] / "raw" / t["name"], exported_set)
             old["exported"] = bool(exported)
             old["export_L"] = export_face_L_one(t["stem"], judge) if (exported and face_Y) else None
+            tones = export_tones(t["stem"]) if exported else {}
+            old["ex_L50"], old["ex_spread"] = tones.get("ex_L50"), tones.get("ex_spread")
             old["export"] = t["export"]
             old["at"] = _stamp_now()
             fresh.append(old)
@@ -2548,6 +3111,14 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
         m["_exported"] = bool(r.get("exported"))
         m["_export_L"] = r.get("export_L")
         m["_scene"], m["_burst"], m["_stem"] = r.get("scene") or "", r.get("burst") or "", r.get("stem") or ""
+        # The tone model's evidence and what he delivered (learn_tone). The
+        # evidence is built by presets.tone_evidence from the store's row
+        # exactly as presets builds it from a new frame; the face target is
+        # export_L, the export's largest face as export_face_L_one reads it,
+        # which the store has always kept.
+        from presets import tone_evidence
+        m["_tone"] = tone_evidence(r.get("m") or {}, {k: r.get(k) for k in ("lv", "iso", "face_Y", "frame_Y", "headroom_ev")})
+        m["_ex_L50"], m["_ex_spread"], m["_ex_face_L"] = r.get("ex_L50"), r.get("ex_spread"), r.get("export_L")
         samples.append((m, r.get("settings") or {}))
         shoots_of.append(root / str(r.get("shoot") or ""))
     # Held out by scene where the cull split the shoot into scenes, by burst
@@ -2569,6 +3140,10 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
         return {}
     mod = learn(samples)
     mod["wb"] = learn_wb(samples)
+    # Where his exports put each frame's midtones, face and tonal spread,
+    # learned per frame and used in place of the constants only where it
+    # beats them on shoots it had not seen (learn_tone).
+    mod["tone"] = learn_tone(samples, shoots_of)
     mod["colour"] = learn_colour(mark)
     from presets import RENDER_GAIN
     # A venue's look, its base and the Base its render gain was measured under
@@ -2590,6 +3165,16 @@ def learn_edit(root: Path = SHOOTS, progress=None) -> dict:
     # only: the manifest keeps the dataset's numbers, not the frames.
     mod["taught_frames"] = learned.frames_by_shoot(table.values())
     print("  " + mod["dataset"]["this_run"])
+    # Which of brightness, face lightness and contrast his exports now
+    # decide, kept with the dataset so the page that reads it back can say
+    # it for as long as this model stands, and printed for the run.
+    mod["dataset"]["tone"] = tone_sentence(mod["tone"])
+    print("  " + mod["dataset"]["tone"])
+    # The tone models against the ones in use, on the same frames in the
+    # same folds (tone_against_live), for learned._check_tone.
+    tone_live = tone_against_live(samples, shoots_of, learned.live_model("edit"), mod["tone"])
+    if tone_live:
+        mod["tone"]["against_live"] = tone_live
     # The two measurements learned.check_edit weighs this against the one in
     # use. Made here because this is the only place both the frames and the
     # finished model exist at once; the deciding is still in learned.py, and
@@ -2734,9 +3319,7 @@ def _has_raw(shoot_name: str, root: Path | None = None) -> bool:
     """Whether this shoot's photographs are still on the disk, by the same rule
     the rest of the pipeline uses: a name is not bytes."""
     base = Path(root) if root is not None else SHOOTS
-    d = base / shoot_name / "raw"
-    if not d.is_dir():
-        d = base / shoot_name
+    d = library.paths(base / shoot_name).raw
     if not d.is_dir():
         return False
     try:
@@ -2799,7 +3382,12 @@ def main() -> None:
     if "w" in wb:
         print(f"\n  white balance: Fluo or AsShot learned from {wb['n']} decisions ({wb['n_fluo']} Fluo) across {wb['scenes']} groups; "
               f"held out by scene (by burst where a shoot is one scene) AUC {wb['auc']:.2f}, accuracy {wb['accuracy']:.2f} against {wb['always_asshot']:.2f} for always-AsShot: used"
-              + (f"; Fluo written only at {wb['kelvin_range'][0]}-{wb['kelvin_range'][1]} K camera as-shot, where he chose it" if wb.get("kelvin_range") else ""))
+              + (f"; Fluo written only at {wb['kelvin_range'][0]}-{wb['kelvin_range'][1]} K camera as-shot, where he chose it" if wb.get("kelvin_range") else "")
+              # Which evidence it read, since the camera's green joins only
+              # when every frame carries it and he cannot otherwise tell.
+              + ("; reads the camera's green as well as its kelvin" if WB_GREEN in (wb.get("features") or [])
+                 else "; the camera's green not read: not every one of these frames carries it "
+                      "(measured before it was kept, or off a RAW it cannot be read from)"))
     else:
         print(f"\n  white balance: {wb.get('note', '')} (n={wb['n']}" + (f", AUC {wb['auc']:.2f}" if "auc" in wb else "") + "); every frame stays AsShot")
     for v in wb.get("where_used") or []:
@@ -2884,7 +3472,13 @@ def _read_export_skin(f: str, judge) -> dict:
     """One finished photograph of his, read for skin and for neutral: the rows
     a colour reading is made of, and nothing else. Separate from learn_colour
     below because this is the part that costs a decode and a face pass, and so
-    the part worth keeping."""
+    the part worth keeping.
+
+    Lab at float precision (presets.cielab) and each face through
+    presets.skin_patch, the one patch and guard the camera JPEG's largest
+    face is read by too, because frame_tones sets that face beside what
+    this reads and a statistic is only compared against itself."""
+    from presets import cielab, skin_patch
     out: dict = {"neutral": None, "skin": []}
     img = cv2.imread(f)
     if img is None:
@@ -2892,21 +3486,14 @@ def _read_export_skin(f: str, judge) -> dict:
     h, w = img.shape[:2]
     if w > 1800:
         img = cv2.resize(img, (1800, int(h * 1800 / w)), interpolation=cv2.INTER_AREA)
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB).astype(np.float32)
-    L, A, B = lab[..., 0] * (100 / 255), lab[..., 1] - 128, lab[..., 2] - 128
+    L, A, B = cielab(img)
     n = (np.hypot(A, B) < 18) & (L > 25) & (L < 85)
     if n.mean() > 0.005:
         out["neutral"] = [round(float(A[n].mean()), 4), round(float(B[n].mean()), 4)]
     for fc in [x for x in judge.detect(img) if x.main]:
-        x, y, fw, fh = [int(v) for v in fc.box]
-        inner = lab[y + int(0.25 * fh):y + int(0.8 * fh), x + int(0.25 * fw):x + int(0.75 * fw)]
-        if inner.size < 300:
-            continue
-        li = float(np.median(inner[..., 0] * (100 / 255)))
-        if not 12 <= li <= 85:        # not skin: hair, a sleeve, the floor
-            continue
-        out["skin"].append([round(li, 4), round(float(np.median(inner[..., 1] - 128)), 4),
-                            round(float(np.median(inner[..., 2] - 128)), 4)])
+        got = skin_patch(L, A, B, fc.box)      # None: too small, or not skin (hair, a sleeve, the floor)
+        if got is not None:
+            out["skin"].append([round(v, 4) for v in got])
     return out
 
 

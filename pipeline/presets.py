@@ -28,6 +28,10 @@ Usage:
     ./pl presets ~/photos/shoots/2026-10-04-lake/raw --install      # also copy into DxO's preset folder
     ./pl presets ~/photos/shoots/2026-10-04-lake/raw --xmp          # tag each pick "Scene 03" in its XMP sidecar
 
+The shoot folder, its raw/ or its cull/ all name the same shoot, laid out
+standard (<shoot>/raw) or flat (RAWs loose in <shoot>): library.paths says
+where its RAWs and its cull are.
+
 The preset file is DxO's own Lua-table text format; the template is the hand-
 built lounge preset with its scene-specific settings zeroed.
 """
@@ -51,7 +55,8 @@ import taste
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import EXIFTOOL, decision_path, decisions_dir, write_atomic, write_json_atomic  # noqa: E402
+from common import EXIFTOOL, JPEG_EXTS, decision_path, write_atomic, write_json_atomic  # noqa: E402
+import library  # noqa: E402
 
 # The template every full preset is built from, and where it came from, since
 # a file shipped in a public repo has to be able to say. It is a preset SAVED
@@ -632,8 +637,16 @@ CLIP_FLOOR = 0.002
 DARK_Y = 0.042
 # A face narrower than this share of the frame is not worth a mask.
 MASK_MIN_FRAC = 0.03
-# A face this far from target after the global correction gets its own mask.
-MASK_MIN_EV = 0.5
+# A face this far from target after the global correction gets its own mask,
+# and a mask moves it at most MASK_MAX_EV. Both were a stop-scale lift (0.5 to
+# get one, up to a full stop in it) until the photographer's own verdict on
+# the same idea in FirstEditMobile: a strong local lift on faces "looks like
+# a flashlight on every face". DxO's AI mask follows the person, which the
+# mobile app's circle did not, but the lift itself is what read as a light,
+# so a mask here is only for a face that is clearly short, and it only ever
+# nudges: the rest is left to the global exposure and to him.
+MASK_MIN_EV = 0.75
+MASK_MAX_EV = 0.5
 # The furthest down one global exposure move goes here, and so the furthest
 # down any frame's written bias may sit: a guard on the slider, not a
 # measurement. decide_exposure clamps to it and so does the levelling that
@@ -802,6 +815,16 @@ def linear_measure(raw_path: Path, faces: list, sbox, pv_wh: tuple[int, int], bo
     pw, ph = pv_wh
     s = Yl.shape[1] / pw                               # preview -> render
     out: dict = {"clip_any": float((n >= 0.999).mean()), "frame_Y": float(np.median(Yl)), "faces": [], "flip": flip}
+    # How far the brightest real detail sits under the sensor's ceiling, in
+    # stops: the 99.95th percentile of the photosites (RawTherapee's auto
+    # levels clips 0.02%; this is the same idea with a little more room). A
+    # global lift may go this far and no further, which is what keeps a
+    # backlit frame's sky from being blown to lift the face in front of it.
+    # Read where CLIP_FLOOR's allowance ends, not at 99.95%: a frame is only
+    # exposed by hand when under 0.2% of it is clipped, and at 99.95% a few
+    # glints (an eye, a lamp) left no headroom at all, so no frame was lifted.
+    top = float(np.percentile(n, 100.0 * (1.0 - CLIP_FLOOR)))
+    out["headroom_ev"] = float(math.log2(1.0 / max(top, 1e-4))) if top > 0 else 6.0
     # The subject's faces (subject_faces): the detector's word, arbitrated by
     # the person boxes, and nothing about whether the landmarker could read
     # the face. Readability once gated this, and nine of a gym's keepers with
@@ -892,7 +915,8 @@ def _stops_to_band(y: float, lo: float, hi: float, gain: float) -> float:
 #
 # Everything a sidecar decision needs from a frame is measured here, in a
 # worker process: faces and landmarks on the camera JPEG, the subject and
-# animal boxes, measure(), the camera's kelvin, and the RAW in linear terms.
+# animal boxes, measure(), the camera's kelvin and green (camera_wb_from_raw),
+# and the RAW in linear terms.
 # None of it touches a GPU (LibRaw and four small CPU nets), and done one
 # frame at a time it used one core of a twelve-core machine; decode and
 # landmarks scale nearly linearly across processes.
@@ -911,7 +935,7 @@ def _worker_models() -> tuple:
 
 def measure_frame(job: tuple) -> tuple[str, dict | None]:
     """(name, preview path or "", decoded-fallback path or "", raw path or "") ->
-    (name, {"m": measure() + kelvin, "lin": linear_measure() or None}) or (name, None)."""
+    (name, {"m": measure() + kelvin + wb_green, "lin": linear_measure() or None}) or (name, None)."""
     name, preview, fallback, raw = job
     judge, subj = _worker_models()
     img = cv2.imread(preview) if preview else None
@@ -931,7 +955,19 @@ def measure_frame(job: tuple) -> tuple[str, dict | None]:
     people = [b for b, c in pairs if c == 0]           # a face's owner is a person, never the dog beside him
     sbox = max(boxes, key=lambda b: b[2] * b[3]) if boxes else None
     is_raw = bool(raw) and Path(raw).suffix.lower() in RAW_EXTS
-    m = dict(measure(img, faces, sbox), kelvin=kelvin_from_raw(Path(raw)) if is_raw else None)
+    # The camera's own reading of the light, both axes of it from one open of
+    # the RAW (camera_wb_from_raw). wb_green is a key added to what this
+    # measures, not a change to what any number already here means, so
+    # taste.MEASURE_SCHEMA stays where it is: a row measured before it simply
+    # lacks it, and the white balance model reads it only where every frame it
+    # is fitted on carries it (taste.learn_wb says why).
+    kelvin, wb_green = camera_wb_from_raw(Path(raw)) if is_raw else (None, None)
+    m = dict(measure(img, faces, sbox), kelvin=kelvin, wb_green=wb_green)
+    # How much the camera's rendering pops (pop.py), flat so the store
+    # keeps it (pop.flat): the frame's colour grade is solved from it
+    # (grade.solve, in frame_tones), and no fitted model learns from it.
+    import pop as colour_scale
+    m.update(colour_scale.flat(colour_scale.pop(img, faces)))
     return name, {"m": m, "lin": linear_measure(Path(raw), faces, sbox, (w, h), boxes=people) if is_raw else None}
 
 
@@ -996,13 +1032,434 @@ def decide_exposure(lin: dict, target_L: float, gain: float = RENDER_GAIN, prefe
     return keys, ev, (f"{note}; {why}" if why else note)
 
 
+# ------------------------------------------------ how much, by hand
+#
+# The rules below replace two refusals that left frames flat: no face meant
+# exposure untouched, and a face under the band got only a mask, never a
+# global lift. FirstEditMobile ran the same "exposure 0" policy and dropped it
+# because it "left underexposed daylight and backlit frames visibly flat".
+# What replaces them is what the published auto tools do (docs/COLOR.md has
+# the survey): lift the midtones toward middle grey, but only as far as the
+# highlight headroom allows (RawTherapee's auto levels; Yuan & Sun, ECCV 2012,
+# who lift globally and leave the rest to local tools, and were preferred to
+# the input 70% to 6%), and aim a dim scene lower so night still reads as
+# night (Night Sight). Numbers marked INF in the survey are inferences, and so
+# are these, and they are named here as such.
+#
+# The frame's target by light level (EV100 of the camera's settings): L* 50,
+# middle grey, in daylight; lower as the light falls, from Krawczyk et al.'s
+# key-by-adaptation model read at those levels (an inference from a tone-
+# mapping model, not a preference study).
+#
+# THE FALLBACK PRIOR, every target number from here to tone_curve: where a
+# frame goes (TARGET_BY_LV, LOW_LIGHT_KEY, DAYLIGHT_BRIGHTNESS_EV), where a
+# face is lifted to (FACE_PREFERRED_MAX) and how much contrast the S-curve
+# adds (TONE_CONTRAST_*). "These need to be dynamic based on ML models not
+# just hard constants": each of the three is now predicted per frame from
+# his own finished exports (taste.learn_tone, read here by predicted_tone),
+# and a constant decides only where that prediction has not earned the
+# place -- too few frames, or no clear held-out win over these very rules
+# on shoots it had not seen. The LIMITS below them are not targets and are
+# not learned: headroom, noise, AUTO_EV_MAX, the daylight and low-light lift
+# limits, the deadband and BIAS_FLOOR bound a learned target exactly as they
+# bound a constant one.
+TARGET_BY_LV = ((2.0, 22.0), (5.0, 36.0), (7.0, 42.0), (10.0, 50.0))
+# Where FirstEditMobile measured the same rules against his own exports, its
+# numbers win over the survey's inferences, because they are his:
+#   - under DAYLIGHT_LV a frame is lifted at most LOW_LIGHT_LIFT stops at LV 7,
+#     falling to none at NIGHT_LV, and only toward LOW_LIGHT_KEY: night kept at
+#     least as dark as he keeps it (lifting TSC06836 1.94 stops turned its black
+#     sky green); the survey's darker night targets (TARGET_BY_LV) would sit
+#     further from his exports still, so they decide nothing below DAYLIGHT_LV:
+#     there a frame under LOW_LIGHT_KEY goes toward it, one over ZONE_V comes
+#     down to ZONE_V, and one between is left as shot;
+#   - in daylight a frame is lifted for a face at most DAYLIGHT_FACE_LIFT, and
+#     not past a frame median of DAYLIGHT_KEY_CEILING: a face that needs more
+#     is backlit, and lifting the whole frame blew the sky (TSC05934 went +3
+#     stops, median L* 89 against his 40).
+DAYLIGHT_LV = 7.0
+NIGHT_LV = 2.0
+LOW_LIGHT_LIFT = 1.0
+LOW_LIGHT_KEY = 40.0
+DAYLIGHT_FACE_LIFT = 1.0
+DAYLIGHT_KEY_CEILING = 55.0
+# His preference, 2026-09-25, on well-lit scenes: "a touch less bright". Every
+# daylight target (a frame's midtones, the lightness a face is lifted toward)
+# sits this many stops lower; low light is untouched until he has judged it.
+# Part of the fallback prior: a frame whose brightness is predicted from his
+# exports is not trimmed again, since the exports already carry the trim he
+# wants (that is where "a touch less bright" was seen).
+DAYLIGHT_BRIGHTNESS_EV = -0.25
+
+
+def daylight_trim(L: float, lv: float | None) -> float:
+    """A daylight target L*, moved by his DAYLIGHT_BRIGHTNESS_EV."""
+    if lv is not None and lv < DAYLIGHT_LV:
+        return L
+    return Lstar(Y(L) * 2 ** DAYLIGHT_BRIGHTNESS_EV)
+
+
+def frame_lift_limit(lin: dict, gain: float, for_face: bool) -> tuple[float, str]:
+    """FirstEditMobile's limit on lifting the whole frame, by the light level
+    and by how bright the frame already is (rendered median L*)."""
+    lv = lin.get("lv")
+    med = lin.get("frame_Y")
+    daylight = lv is None or lv >= DAYLIGHT_LV
+    if daylight:
+        limit, why = (DAYLIGHT_FACE_LIFT if for_face else AUTO_EV_MAX), ("a daylight face lift" if for_face else "")
+    else:
+        t = min(1.0, max(0.0, (lv - NIGHT_LV) / (DAYLIGHT_LV - NIGHT_LV)))
+        limit, why = LOW_LIGHT_LIFT * t, f"low light (LV {lv:.0f})"
+    if med and med > 0:
+        ceiling = DAYLIGHT_KEY_CEILING if daylight else LOW_LIGHT_KEY
+        room = math.log2(Y(ceiling) / (med * 2 ** gain))
+        if (for_face or not daylight) and room < limit:
+            limit, why = max(0.0, room), f"the frame already at L* {Lstar(med * 2 ** gain):.0f}"
+    return limit, why
+# A face under the band is taken toward the band's middle, never past this:
+# FirstEditMobile's cap, above which daylight faces read as lit. The band's
+# middle is the fallback prior for where a face goes; this cap is also the
+# ceiling on a face aim predicted from his exports (face_aim), so it bounds
+# the learned target as it bounds the constant one.
+FACE_PREFERRED_MAX = 58.0
+# One auto move goes no further than this either way (the range the exposure-
+# correction literature trains over, Afifi et al. 2021).
+AUTO_EV_MAX = 1.5
+# A lift is a push of the sensor's noise: no further than ISO x 2^lift of this
+# (an inference: no published number was found).
+NOISE_ISO_MAX = 12800
+# Under a third of a stop is not worth writing.
+DEADBAND_EV = 1 / 3
+# Room left under the ceiling when lifting to the headroom.
+HEADROOM_MARGIN_EV = 0.15
+
+
+def exif_light(paths: list[str]) -> dict[str, dict]:
+    """{path: {"iso", "lv"}} from EXIF: LV as the EV100 of the settings the
+    camera chose, log2(N^2 / t) - log2(ISO / 100), which is the scene's light
+    level when the camera metered it. Frames exiftool cannot read are left out."""
+    if not paths:
+        return {}
+    try:
+        got = json.loads(subprocess.run([EXIFTOOL, "-j", "-n", "-ISO", "-ExposureTime", "-FNumber", *paths],
+                                        capture_output=True, text=True, timeout=600).stdout or "[]")
+    except Exception:  # noqa: BLE001
+        return {}
+    out: dict[str, dict] = {}
+    for e in got:
+        try:
+            iso, t, n = float(e.get("ISO")), float(e.get("ExposureTime")), float(e.get("FNumber"))
+        except (TypeError, ValueError):
+            continue
+        if iso > 0 and t > 0 and n > 0:
+            out[e["SourceFile"]] = {"iso": iso, "lv": math.log2(n * n / t) - math.log2(iso / 100.0)}
+    return out
+
+
+# A gentle S-curve on the master tone curve, per frame: FirstEditMobile's
+# (ToneCurve.swift), v - c sin(2 pi v) / 2 pi on encoded values, with c its
+# base contrast times its amplitude 0.6: 0.10 in daylight, 0.05 in low light.
+# It steepens the midtones a little and leaves black and white where they are.
+# None on a frame whose tones already spread wide (L* p95 - p5 over
+# TONE_WIDE): contrast there is the scene's, and a curve would only crush it.
+# His preference, 2026-09-25, on well-lit scenes: "a little more contrast"
+# than FirstEditMobile's 0.10 gave (0.06 amplitude); low light untouched.
+# The fallback prior: where the spread of his exports is predicted per frame
+# (taste.learn_tone), the amplitude is solved for that spread instead
+# (solve_contrast), within TONE_C_MAX, and these decide only where it is not.
+TONE_CONTRAST_DAY = 0.17
+TONE_CONTRAST_LOW = 0.05
+TONE_AMPLITUDE = 0.6
+TONE_WIDE = 75.0
+TONE_POINTS = 9
+
+
+TONE_C_MAX = 0.2          # the largest amplitude solve_contrast may choose: twice the daylight prior's
+
+
+def _s_curve(v: float, c: float) -> float:
+    """The S-curve itself, on an encoded value 0..1: v - c sin(2 pi v) / 2 pi.
+    One place, because the curve written, the spread it is expected to give
+    and the amplitude solved for a spread must all be the same curve."""
+    return min(1.0, max(0.0, v - c * math.sin(2 * math.pi * v) / (2 * math.pi)))
+
+
+def spread_ends(m: dict) -> tuple[float, float] | None:
+    """The camera frame's L* p5 and p95, where measure() kept them; for a row
+    measured before it did, its range placed either side of its median, which
+    is exact for a symmetric spread and the one assumption the store allows.
+    None with no range to read."""
+    lo, hi = m.get("L_p5"), m.get("L_p95")
+    if lo is not None and hi is not None and hi > lo:
+        return float(lo), float(hi)
+    rng, mid = m.get("range"), m.get("frame_L")
+    if rng is None or mid is None or rng <= 0:
+        return None
+    return max(0.0, float(mid) - float(rng) / 2.0), min(100.0, float(mid) + float(rng) / 2.0)
+
+
+def curve_spread_ratio(c: float, m: dict) -> float | None:
+    """How much wider the frame's p5-p95 spread comes out through the S-curve
+    of amplitude c: (f(p95) - f(p5)) / (p95 - p5), with L*/100 standing for
+    the encoded value the curve acts on. Both are near-perceptual scales and
+    track each other closely in the midtones, where the curve does its work;
+    this is the "simpler equivalent" of pushing the whole L* histogram
+    through the curve, and it measures exactly the statistic the target is
+    (a p95 - p5 spread), not a proxy for it. 1.0 is no change. None where the
+    frame has no spread to read."""
+    ends = spread_ends(m)
+    if ends is None:
+        return None
+    lo, hi = ends[0] / 100.0, ends[1] / 100.0
+    if hi - lo < 0.01:
+        return None
+    return (_s_curve(hi, c) - _s_curve(lo, c)) / (hi - lo)
+
+
+def rule_contrast(lv: float | None) -> float:
+    """The S-curve amplitude the constants give at this light: the fallback prior."""
+    low = lv is not None and lv < DAYLIGHT_LV
+    return (TONE_CONTRAST_LOW if low else TONE_CONTRAST_DAY) * TONE_AMPLITUDE
+
+
+def solve_contrast(ratio: float, m: dict) -> float | None:
+    """The amplitude, in [0, TONE_C_MAX], whose S-curve gives this frame's
+    camera tones the spread ratio his exports are predicted to have.
+
+    Bisected on the frame's own p5/p95 through the very curve tone_curve
+    writes, so a frame whose tones sit in the shadows (where the S does
+    little, or even narrows them) gets a different amplitude for the same
+    spread than one centred on mid-grey. A spread the curve cannot reach
+    inside the interval takes the nearer end: 0, no curve, for a frame he
+    delivers flatter than shot -- this S only adds contrast, and taking it
+    away is not a move the tone curve is written to make -- and TONE_C_MAX
+    for one he delivers punchier than any gentle S reaches. None where the
+    frame has no spread to solve on."""
+    if curve_spread_ratio(0.0, m) is None:
+        return None
+
+    def g(c: float) -> float:
+        return float(curve_spread_ratio(c, m)) - ratio
+
+    a, b = 0.0, TONE_C_MAX
+    ga, gb = g(a), g(b)
+    if ga * gb > 0:
+        return a if abs(ga) <= abs(gb) else b
+    for _ in range(40):
+        mid = (a + b) / 2.0
+        gm = g(mid)
+        if ga * gm <= 0:
+            b = mid
+        else:
+            a, ga = mid, gm
+    return (a + b) / 2.0
+
+
+def tone_curve(lv: float | None, spread: float | None, c: float | None = None,
+               why: str = "") -> tuple[list[float] | None, str]:
+    """The frame's master tone curve as PhotoLab stores it (x0, y0, x1, y1, ...
+    in 0..1), or None, and a word on why.
+
+    `c` is an amplitude solved from his exports (solve_contrast) and `why`
+    says where it came from; without one the constants decide
+    (rule_contrast). Either way a frame whose tones already spread past
+    TONE_WIDE gets no curve: that guard is not a target, and nothing learned
+    moves it."""
+    if spread is not None and spread > TONE_WIDE:
+        return None, f"tones already spread L* {spread:.0f}: no curve"
+    low = lv is not None and lv < DAYLIGHT_LV
+    if c is None:
+        c = rule_contrast(lv)
+        why = f"rule: S-curve {c:.2f} ({'low light' if low else 'daylight'})"
+    if c < 0.005:
+        return None, (why or "no curve") + "; no curve"
+    pts: list[float] = []
+    for i in range(TONE_POINTS):
+        v = i / (TONE_POINTS - 1)
+        pts += [round(v, 4), round(_s_curve(v, c), 4)]
+    return pts, why or f"S-curve {c:.2f}"
+
+
+def frame_target(lv: float | None) -> float:
+    """The L* a frame's midtones are taken to at this light level (the
+    fallback prior; rule_frame_target adds the low-light key and the trim)."""
+    if lv is None:
+        return ZONE_V
+    pts = TARGET_BY_LV
+    if lv <= pts[0][0]:
+        return pts[0][1]
+    for (a, la), (b, lb) in zip(pts, pts[1:]):
+        if lv <= b:
+            return la + (lb - la) * (lv - a) / (b - a)
+    return pts[-1][1]
+
+
+def rule_frame_target(lv: float | None, rendered: float) -> float:
+    """Where the constants take a frame with no face, given its midtones'
+    rendered L*: the whole fallback prior for brightness in one place, so
+    _expose and the learner's baseline (taste.learn_tone scores a learned
+    target against exactly this) cannot drift apart. In low light a frame is
+    lifted only toward LOW_LIGHT_KEY and left as shot between it and
+    mid-grey (FirstEditMobile, fitted to his exports), and brought down to
+    mid-grey from above it; in daylight, the light level's target less his
+    DAYLIGHT_BRIGHTNESS_EV."""
+    daylight = lv is None or lv >= DAYLIGHT_LV
+    if not daylight and rendered <= ZONE_V:
+        return LOW_LIGHT_KEY if rendered < LOW_LIGHT_KEY else rendered
+    if not daylight:
+        return ZONE_V
+    return daylight_trim(frame_target(lv), lv)
+
+
+def rule_face_aim(lv: float | None) -> float:
+    """Where the constants lift a face to: the published band's middle, never
+    past FACE_PREFERRED_MAX, less the daylight trim."""
+    lo, hi = PUBLISHED.FACE_L_LO, PUBLISHED.FACE_L_HI
+    return daylight_trim(min((lo + hi) / 2.0, FACE_PREFERRED_MAX), lv)
+
+
+def face_aim(lin: dict) -> tuple[float, str]:
+    """Where a face under the band, or low in it, is lifted to, and what
+    decided that.
+
+    His exports' face lightness where it is predicted for this frame
+    (predicted_tone, carried in lin["pred"]), held inside the published band
+    and never past FACE_PREFERRED_MAX: the band and the cap are the published
+    and the measured bounds on a face, and a model of one photographer's
+    placements is not evidence against either. Otherwise the constants
+    (rule_face_aim), and the words say "rule"."""
+    pred = lin.get("pred") or {}
+    got = pred.get("face_L")
+    if got is not None:
+        lo, hi = PUBLISHED.FACE_L_LO, min(PUBLISHED.FACE_L_HI, FACE_PREFERRED_MAX)
+        aim = min(hi, max(lo, float(got)))
+        return aim, (pred.get("words") or {}).get("face_L") or f"face from your exports: L* {aim:.0f}"
+    lv = lin.get("lv")
+    aim = rule_face_aim(lv)
+    day = lv is None or lv >= DAYLIGHT_LV
+    return aim, (f"rule: face toward the band's middle, never past L* {FACE_PREFERRED_MAX:.0f}"
+                 + (f", {DAYLIGHT_BRIGHTNESS_EV:+.2f} EV in daylight" if day else ""))
+
+
+def tone_evidence(m: dict, lin: dict | None) -> dict:
+    """One frame's evidence for the tone model (taste.learn_tone), from the
+    camera JPEG (measure) and the RAW (linear_measure, exif_light), in raw
+    units, None where a reading is missing. The learner builds the same dict
+    from what the measurement store kept of a finished frame, so the row a
+    model is fitted on and the row it is later asked about are one thing."""
+    lin = lin or {}
+    fl = m.get("face_L_big")
+    if fl is None:
+        fl = m.get("face_L")
+    return {"lv": lin.get("lv"), "iso": lin.get("iso"), "frame_L": m.get("frame_L"), "range": m.get("range"),
+            "clip": m.get("clip"), "L_p5": m.get("L_p5"), "L_p95": m.get("L_p95"), "face_L": fl,
+            "face_Y": lin.get("face_Y"), "frame_Y": lin.get("frame_Y"), "headroom_ev": lin.get("headroom_ev")}
+
+
+def rule_tone(ev: dict, gain: float = RENDER_GAIN) -> dict:
+    """What the constants target on one frame, for each target the tone model
+    learns, from its evidence (tone_evidence): the baseline a learned target
+    has to beat (taste.learn_tone). The rule's whole answer on that frame and
+    not its bare constant, so the comparison is fair to it:
+
+      L50 -- rule_frame_target on the frame's rendered midtones (the RAW's
+          frame_Y through the render lift; the camera JPEG's median where
+          the RAW was never read);
+      face_L -- where _expose leaves the face: lifted to the aim if under
+          it, left where it is inside the band above the aim (the rule never
+          darkens a face there), down to the band's top if over it;
+      spread_ratio -- the spread its S-curve gives the frame's camera tones
+          (curve_spread_ratio), 1.0 where TONE_WIDE writes no curve.
+
+    Each None where the frame has nothing to read it from."""
+    lv = ev.get("lv")
+    fy = ev.get("frame_Y")
+    rendered = Lstar(fy * 2 ** gain) if fy else ev.get("frame_L")
+    out: dict = {"L50": rule_frame_target(lv, float(rendered)) if rendered is not None else None}
+    fyf = ev.get("face_Y")
+    now = Lstar(fyf * 2 ** gain) if fyf else ev.get("face_L")
+    if now is None:
+        out["face_L"] = None
+    else:
+        aim, hi = rule_face_aim(lv), PUBLISHED.FACE_L_HI
+        out["face_L"] = aim if now < aim else (hi if now > hi else float(now))
+    rng = ev.get("range")
+    out["spread_ratio"] = 1.0 if (rng is not None and rng > TONE_WIDE) else curve_spread_ratio(rule_contrast(lv), ev)
+    return out
+
+
+def predicted_tone(m: dict, lin: dict | None) -> dict:
+    """This frame's targets predicted from his finished exports: {"L50",
+    "face_L", "spread_ratio"}, each None where its model is not in use (never
+    fitted, or it did not beat the rule on shoots it had not seen), and
+    "words", saying for each predicted one where the number came from, for
+    the frame's note. taste.tone_call does the arithmetic; this only asks."""
+    model = (taste.load() or {}).get("tone") or {}
+    ev = tone_evidence(m, lin)
+    out: dict = {"words": {}}
+    for key in taste.TONE_TARGETS:
+        entry = model.get(key) or {}
+        v = taste.tone_call(entry, ev, key)
+        out[key] = v
+        if v is not None:
+            out["words"][key] = taste.tone_words(entry, key, v)
+    return out
+
+
+def lift_room(lin: dict) -> tuple[float, str]:
+    """How far up one global move may go on this frame, and what stops it."""
+    room, why = AUTO_EV_MAX, f"the {AUTO_EV_MAX:g} EV limit"
+    head = lin.get("headroom_ev")
+    if head is not None and head - HEADROOM_MARGIN_EV < room:
+        room, why = max(0.0, head - HEADROOM_MARGIN_EV), "the highlights"
+    iso = lin.get("iso")
+    if iso and iso > 0:
+        noise = math.log2(NOISE_ISO_MAX / iso)
+        if noise < room:
+            room, why = max(0.0, noise), f"noise at ISO {int(iso)}"
+    return room, why
+
+
 def _expose(lin: dict, target_L: float, gain: float, band: tuple | None, mode: str) -> tuple[dict, float, str]:
     """HOW MUCH, once decide_exposure has said which."""
     y = lin.get("face_Y")
     lo, hi = _band(target_L, band)
+    if mode == "Manual" and not y:
+        # No face: the frame's midtones to the target for its light level,
+        # up only as far as the headroom and the noise allow.
+        med = lin.get("frame_Y")
+        lv = lin.get("lv")
+        if not med or med <= 0:
+            return {"ExposureActive": False, "ExposureAutoMode": "Manual", "ExposureBias": 0}, 0.0, "nothing to measure: exposure left as it is"
+        rendered = Lstar(med * 2 ** gain)
+        # WHERE TO: the midtones his exports are predicted to have on a frame
+        # like this (taste.learn_tone, via predicted_tone into lin["pred"]),
+        # where that prediction beat the rule on shoots it had not seen;
+        # otherwise the rule (rule_frame_target, the fallback prior). HOW
+        # FAR is the same either way: every limit below bounds a learned
+        # target exactly as it bounds a constant one.
+        pred = lin.get("pred") or {}
+        if pred.get("L50") is not None:
+            want_L = float(pred["L50"])
+            source = (pred.get("words") or {}).get("L50") or f"brightness from your exports: L* {want_L:.0f}"
+        else:
+            want_L = rule_frame_target(lv, rendered)
+            source = "rule: target by light level" + (f", {DAYLIGHT_BRIGHTNESS_EV:+.2f} EV in daylight"
+                                                       if lv is None or lv >= DAYLIGHT_LV else ", low-light key")
+        want = math.log2(Y(want_L) / med) - gain
+        room, stop = lift_room(lin)
+        cap, cap_why = frame_lift_limit(lin, gain, for_face=False)
+        if cap < room:
+            room, stop = cap, cap_why
+        ev = min(want, room) if want > 0 else max(want, -AUTO_EV_MAX, BIAS_FLOOR)
+        ev = round(ev, 2)
+        light = f"LV {lv:.0f}" if lv is not None else "light level unknown"
+        where = f"midtones at L* {rendered:.0f} rendered, {light}: target L* {want_L:.0f} ({source})"
+        if abs(ev) < DEADBAND_EV:
+            return {"ExposureActive": False, "ExposureAutoMode": "Manual", "ExposureBias": 0}, 0.0, f"{where}; within a third of a stop, left alone"
+        return ({"ExposureActive": True, "ExposureAutoMode": "Manual", "ExposureBias": ev}, ev,
+                f"{where}; by hand {ev:+.2f} EV" + (f" (wanted {want:+.2f}, held by {stop})" if want > 0 and want - ev > 0.05 else ""))
     if mode == "Manual":
-        if not y:
-            return {"ExposureActive": False, "ExposureAutoMode": "Manual", "ExposureBias": 0}, 0.0, "no face of the subject to measure: exposure left as it is"
         # The true shortfall and the value that may be WRITTEN are two
         # different numbers, and the note prints the true one. The clamp is a
         # guard on the slider, not a measurement: printing the clamped figure
@@ -1011,11 +1468,33 @@ def _expose(lin: dict, target_L: float, gain: float, band: tuple | None, mode: s
         # EV on exactly the frames where the decision is hardest, and the
         # comment below says the decision is his.
         want = _stops_to_band(y, lo, hi, gain)
-        ev = round(max(BIAS_FLOOR, min(1.0, want)), 2)
+        ev = round(max(BIAS_FLOOR, -AUTO_EV_MAX, min(1.0, want)), 2)
         clipped = abs(want - ev) > 0.005
         where = f"face at L* {Lstar(y):.0f} in the raw, {Lstar(y * 2 ** gain):.0f} rendered"
         if ev > 0:
-            # A face under the band while the rest of the frame is where it
+            # The face is under the band: a global lift toward the aim
+            # (face_aim: where his exports put a face like this, where that
+            # is learned and in use, else the band's middle; inside the band
+            # and never past FACE_PREFERRED_MAX either way), as far as the
+            # headroom and the noise allow; what that cannot reach is left to
+            # the face's own mask (face_masks), which only nudges.
+            aim, source = face_aim(lin)
+            pref = math.log2(Y(aim) / max(y, 1e-4)) - gain
+            room, stop = lift_room(lin)
+            cap, cap_why = frame_lift_limit(lin, gain, for_face=True)
+            if cap < room:
+                room, stop = cap, cap_why
+            lift = round(max(0.0, min(pref, room)), 2)
+            if lift >= DEADBAND_EV:
+                return ({"ExposureActive": True, "ExposureAutoMode": "Manual", "ExposureBias": lift}, lift,
+                        f"{where}: under {lo:.0f}, {want:+.2f} EV short, lifted {lift:+.2f} EV toward L* {aim:.0f} ({source})"
+                        + (f" (held by {stop}; the rest left to a face mask)" if pref - lift > 0.05 else ""))
+            # No room for a global lift (a backlit frame: the sky is at the
+            # ceiling), so the face's mask does what little it may.
+            #
+            # (What follows is the earlier reasoning for leaving a short face
+            # to its mask, kept because it still holds where there is no
+            # room.) A face under the band while the rest of the frame is where it
             # should be is a LOCAL problem, and the published order of
             # operations gives a local problem a local tool: primary
             # contrast, primary colour, qualification, shapes (Van Hurkman,
@@ -1033,9 +1512,29 @@ def _expose(lin: dict, target_L: float, gain: float, band: tuple | None, mode: s
             # ask a median +0.89 EV of 114 of 152 delivered frames, which is
             # the largest change anything here could make, so the EV is
             # printed and the decision is his.
-            return {"ExposureActive": False, "ExposureAutoMode": "Manual", "ExposureBias": 0}, 0.0, f"{where}: under {lo:.0f}, {want:+.2f} EV short, left to a face mask"
+            return {"ExposureActive": False, "ExposureAutoMode": "Manual", "ExposureBias": 0}, 0.0, f"{where}: under {lo:.0f}, {want:+.2f} EV short, no room to lift ({stop}), left to a face mask"
         if ev == 0:
-            return {"ExposureActive": False, "ExposureAutoMode": "Manual", "ExposureBias": 0}, 0.0, f"{where}: inside {lo:.0f}-{hi:.0f}, left alone"
+            # Inside the band. The band is every skin type's preferred
+            # lightness (39.8-67.3), so a face at its dark edge is "in" and
+            # still reads dark: it is lifted toward the aim (face_aim, as
+            # above), never past FACE_PREFERRED_MAX and never darkened here --
+            # a learned aim under the face does not pull it down; that is a
+            # guard, not a target -- within the same limits as any lift.
+            aim, source = face_aim(lin)
+            now = Lstar(y * 2 ** gain)
+            if now < aim:
+                pref = math.log2(Y(aim) / max(y, 1e-4)) - gain
+                room, stop = lift_room(lin)
+                cap, cap_why = frame_lift_limit(lin, gain, for_face=True)
+                if cap < room:
+                    room, stop = cap, cap_why
+                lift = round(max(0.0, min(pref, room)), 2)
+                if lift >= DEADBAND_EV:
+                    return ({"ExposureActive": True, "ExposureAutoMode": "Manual", "ExposureBias": lift}, lift,
+                            f"{where}: inside {lo:.0f}-{hi:.0f}, lifted {lift:+.2f} EV toward L* {aim:.0f} ({source})"
+                            + (f" (held by {stop})" if pref - lift > 0.05 else ""))
+            return ({"ExposureActive": False, "ExposureAutoMode": "Manual", "ExposureBias": 0}, 0.0,
+                    f"{where}: inside {lo:.0f}-{hi:.0f}, left alone (aim L* {aim:.0f}; {source})")
         return ({"ExposureActive": True, "ExposureAutoMode": "Manual", "ExposureBias": ev}, ev,
                 f"{where}; by hand {ev:+.2f} EV to {lo:.0f}-{hi:.0f}"
                 + (f" (the face is {want:+.2f} EV out; {ev:+.2f} is as far as one exposure move goes here)" if clipped else ""))
@@ -1060,11 +1559,11 @@ def face_masks(lin: dict, target_L: float, ev_global: float, gain: float = RENDE
         if abs(resid) < MASK_MIN_EV:
             continue
         sx, sy = to_sensor(f["cx"], f["cy"], int(lin.get("flip") or 0))   # PhotoLab reads the prompt in the sensor's frame
-        ev = round(max(-1.0, min(1.0, resid)), 2)
-        # "short" carries what the mask could NOT do. A mask is clamped to one
-        # stop, and 18 of the 37 the action venue gets sit exactly at it, 16
-        # of them genuinely clipped: a note that says "1 face mask" and
-        # nothing else reads as a solved frame when the face is still short.
+        ev = round(max(-MASK_MAX_EV, min(MASK_MAX_EV, resid)), 2)
+        # "short" carries what the mask could NOT do. A mask is clamped to
+        # MASK_MAX_EV, and on the action venue most masks sat at the clamp: a
+        # note that says "1 face mask" and nothing else reads as a solved
+        # frame when the face is still short.
         masks.append({"name": f"Face {i + 1}", "x": round(sx, 6), "y": round(sy, 6),
                       "ExposureBias": ev, "short": round(resid - ev, 2)})
     return masks
@@ -1210,8 +1709,10 @@ def export_face_L(shoot: Path, judge, quiet: bool = True) -> float | None:
     if not found:
         return None
     key = {"n": len(found), "newest": round(max(m for _, m in found), 3)}
-    here = shoot.parent if shoot.name == "raw" else shoot
-    cache = (here / "cull" if (here / "cull").is_dir() else here / "_cull") / "face_L.json"
+    # The shoot's cull by the one rule (library.paths), where cull.csv is: the
+    # old "cull/ if it is a folder, else _cull/" put the cache in an empty
+    # cull/ on a flat shoot whose cull lives in _cull/.
+    cache = library.paths(shoot).cull / "face_L.json"
     try:
         was = json.loads(cache.read_text())
         if was.get("key") == key:
@@ -1250,39 +1751,245 @@ def export_face_L(shoot: Path, judge, quiet: bool = True) -> float | None:
     return out
 
 
-def kelvin_from_raw(path: Path) -> float | None:
-    """The camera's as-shot multipliers against its daylight ones, on a mired
-    scale. Within a few hundred kelvin of what DxO shows for as-shot."""
+def camera_wb_from_raw(path: Path) -> tuple[float | None, float | None]:
+    """The light the camera took itself to be under, read off the RAW's
+    as-shot multipliers against its own daylight ones: (kelvin, wb_green).
+    One open of the file for both: opening the RAW is nearly all of the
+    cost, and wherever one is measured the other belongs beside it. Either is
+    None when it cannot be read, independently of the other. Neither is on
+    DxO's scale and neither ever reaches a sidecar: they are evidence a model
+    weighs and numbers the notes say, and taste.check_dop refuses any
+    temperature that is not DxO's own or his eyedropper's.
+
+    kelvin: the red/blue ratio of the as-shot multipliers against the
+    daylight ones, on a mired scale. Within a few hundred kelvin of what DxO
+    shows for as-shot. This is kelvin_from_raw, number for number: every
+    stored measurement, every venue centre and the white balance model in
+    use were made with it, so it is computed by the same expression and
+    fails the same way.
+
+    wb_green: the other axis of the light, which the red/blue ratio cannot
+    see at all. The red/blue ratio runs warm to cool, along the Planckian
+    locus. A fluorescent tube, and many LEDs, differ from a bulb or daylight
+    of the same correlated colour temperature not along that line but off
+    it, on the green side (a positive Duv, in CIE terms), and that is what
+    DxO's Fluo preset corrects: the one colour decision he makes, Fluo on 92
+    of his 205 edits. cast_a on the camera JPEG is no substitute, because it
+    is read after the camera's own white balance has already taken most of
+    that green out. The multipliers are the record of what was taken out: a
+    camera that took the light for green turned its green channel down
+    against red and blue.
+
+    No matrix is needed to read it, and none is used. A multiplier is the
+    gain that makes the light the camera assumed read neutral, so that
+    light's response in each channel is 1/cw, and relative to the camera's
+    daylight balance it is dw/cw. wb_green is green's share of that against
+    the geometric mean of red and blue, in stops:
+
+        wb_green = log2( rel_G / sqrt(rel_R * rel_B) ),  rel = dw / cw
+
+    0 is the daylight balance's own green; positive, the camera took the
+    light to be greener than daylight and took green out; negative, more
+    magenta. The overall scale of either set of multipliers cancels, as it
+    does in kelvin, which matters because libraw reports as-shot in the
+    camera's own units and daylight normalised to green. Green is index 1:
+    the second green (index 3) is 0 on some bodies and a copy of the first
+    on others. Read only on a sensor whose first three channels libraw names
+    R, G and B; on any other the indices name other colours, and a number
+    read off them would be about nothing.
+
+    What it is not. It is a reading in the camera's own space: not Duv, not
+    on DxO's tint scale or anyone's, not comparable between camera bodies,
+    and never written into a sidecar. Nor is it zero along the locus. In camera space the
+    Planckian locus is not a line of constant green, so a warm light sitting
+    exactly on it also reads away from 0: for an idealised sensor (three
+    narrow bands at 600, 540 and 460 nm, Wien's approximation) about a fifth
+    of a stop greener at 3000 K than at daylight, and a real camera's broad,
+    overlapping filters change that by an amount that is the camera's and
+    not ours to assume. That drift is why it sits beside kelvin in the white
+    balance model (taste.learn_wb) rather than replacing it: the two together
+    place the light in a plane, and which part of that plane he calls Fluo
+    is what the model learns from his frames, not something set here."""
     try:
         import rawpy
         with rawpy.imread(str(path)) as r:
             cw, dw = r.camera_whitebalance, r.daylight_whitebalance
+            try:
+                desc = bytes(r.color_desc)
+            except Exception:  # noqa: BLE001
+                desc = b""          # no names for the channels: no green to read, and kelvin as it always was
+    except Exception:  # noqa: BLE001
+        return None, None
+    try:
         k = (cw[0] / cw[2]) / (dw[0] / dw[2])
         mired = 182.0 * (1.0 / k) ** 0.567
-        return 1e6 / mired
+        kelvin = 1e6 / mired
     except Exception:  # noqa: BLE001
+        kelvin = None
+    return kelvin, _green_of(cw, dw, desc)
+
+
+def _green_of(cw, dw, desc: bytes) -> float | None:
+    """wb_green from the two sets of multipliers (camera_wb_from_raw says what
+    it is). None for anything that is not a positive, finite multiplier on
+    each of R, G and B in both sets: libraw reports 0 for a daylight balance
+    it has no table for, and a ratio against 0 is not a small reading, it is
+    no reading."""
+    if desc[:3] != b"RGB":
         return None
+    try:
+        c = [float(cw[i]) for i in (0, 1, 2)]
+        d = [float(dw[i]) for i in (0, 1, 2)]
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not all(math.isfinite(v) and v > 0 for v in c + d):
+        return None
+    rel_r, rel_g, rel_b = (d[i] / c[i] for i in (0, 1, 2))
+    g = math.log2(rel_g / math.sqrt(rel_r * rel_b))
+    return g if math.isfinite(g) else None
+
+
+def kelvin_from_raw(path: Path) -> float | None:
+    """The camera's as-shot multipliers against its daylight ones, on a mired
+    scale. Within a few hundred kelvin of what DxO shows for as-shot."""
+    return camera_wb_from_raw(path)[0]
+
+
+# sRGB's transfer function, decoded for each of the 256 values an 8-bit
+# channel can hold. A table and not an approximation: an 8-bit photograph has
+# no other values to decode, so this is exact. cielab() says why it is
+# decoded here and not by OpenCV.
+_CODE = np.arange(256) / 255.0
+_SRGB_LINEAR = np.where(_CODE <= 0.04045, _CODE / 12.92, ((_CODE + 0.055) / 1.055) ** 2.4).astype(np.float32)
+del _CODE
+
+
+def cielab(bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """CIELAB (D65) of an 8-bit BGR photograph at float precision: L* 0..100
+    and a*, b* signed, as three float32 arrays the size of the image. Every
+    colour reading measure() and taste's export reader make goes through
+    here.
+
+    It was cv2.cvtColor on the 8-bit image, which hands Lab back in 8 bits
+    too: L* scaled to 0..255 and a*, b* offset by 128, each ROUNDED to a
+    whole unit. The face readings are medians of those, so a face's a* and
+    b* came out in whole or half units, and at skin chroma (C*ab 20-25) one
+    unit across the hue direction is 2.3-2.9 degrees of hue -- about the
+    width of PUBLISHED.SKIN_HUE_TOL, the tolerance hue is judged to. An
+    instrument whose step is its own tolerance cannot tell a face at the
+    edge of it from one a step inside, and his learned skin hue and its
+    spread (taste.learn_colour) are medians of hues read off those steps. Over
+    every skin-coloured 8-bit value (L* 12-85, C*ab over 10, hue 20-80) the
+    rounded reading was up to 8.8 degrees of hue from the textbook one,
+    median 0.25.
+
+    Not OpenCV's float conversion either, which was the obvious fix and was
+    measured before it was relied on. It does apply sRGB's transfer
+    function, but it gets there by interpolating a lookup table: over all
+    16.7 million 8-bit colours, against a textbook sRGB -> XYZ (D65) -> Lab,
+    it is off by up to 0.47 in a* and 0.33 in b*, 1.6 degrees of hue on a
+    skin colour, and it reads L* 0.09 low on average, which is a bias and
+    not noise. So the transfer function is decoded here from the table above
+    and OpenCV does only the linear part (COLOR_LBGR2LAB, which it computes
+    rather than interpolates): within 0.003 of the textbook on every one of
+    those colours, and within 0.0002 of the same arithmetic done with
+    OpenCV's own six-figure matrix and white point, in about the time the
+    float conversion takes (30 ms an 1800 px frame, where the 8-bit one
+    took 8).
+
+    Precision, not meaning, which is why taste.MEASURE_SCHEMA did not move
+    for it (the comment there says what that was checked against)."""
+    x = cv2.cvtColor(_SRGB_LINEAR[bgr], cv2.COLOR_LBGR2LAB)
+    return x[..., 0], x[..., 1], x[..., 2]
+
+
+def skin_rect(box) -> tuple[slice, slice]:
+    """Rows and columns of a face box that skin_patch reads: the middle of
+    it, 25-80% of its height and 25-75% of its width, well inside the
+    hairline, the ears and whatever is behind the head."""
+    x, y, fw, fh = [int(v) for v in box]
+    return slice(y + int(0.25 * fh), y + int(0.8 * fh)), slice(x + int(0.25 * fw), x + int(0.75 * fw))
+
+
+def skin_patch(L: np.ndarray, A: np.ndarray, B: np.ndarray, box) -> tuple[float, float, float] | None:
+    """The median L*, a*, b* of a face's skin (skin_rect, on cielab()'s
+    arrays), or None where there is none to read: under 100 pixels of it, or
+    a median L* outside 12-85, which is not skin-lit (hair, a sleeve, the
+    floor, a face in silhouette or blown to white).
+
+    ONE patch and one guard for both sides of the comparison the colour side
+    makes on a face: his delivered skin, which taste.learn_colour reads off
+    his exports (taste._read_export_skin), and the largest face on the
+    camera JPEG, which measure() reads for the face_*_big numbers that
+    frame_tones prints against it. They were two patches that had drifted
+    apart -- 20-85% of the height and 20-80% of the width here, with a
+    guard of 34 pixels, against 25-80% and 25-75% with a guard of 100 on the
+    export -- so a hue read with more hairline and jaw edge in it was being
+    set beside one read with less, which is the mismatch PUBLISHED's rule
+    (a statistic is only ever compared against the same statistic) exists
+    to stop. The export side's patch is the one kept, because it is the one
+    his learned skin hue was made of. The 100 is the export reader's own
+    guard: it counted 300 values over three channels."""
+    rows, cols = skin_rect(box)
+    Lp = L[rows, cols]
+    if Lp.size < 100:
+        return None
+    li = float(np.median(Lp))
+    if not 12 <= li <= 85:
+        return None
+    return li, float(np.median(A[rows, cols])), float(np.median(B[rows, cols]))
 
 
 def measure(img: np.ndarray, faces: list, box) -> dict:
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB).astype(np.float32)
-    L, A, B = lab[..., 0] * (100 / 255), lab[..., 1] - 128, lab[..., 2] - 128
+    L, A, B = cielab(img)
     h, w = L.shape
-    m: dict = {"frame_L": float(np.median(L)), "range": float(np.percentile(L, 95) - np.percentile(L, 5))}
+    p5, p95 = (float(v) for v in np.percentile(L, (5, 95)))
+    m: dict = {"frame_L": float(np.median(L)), "range": p95 - p5}
+    # The two ends `range` is the distance between, kept beside it. The tone
+    # curve works on where a frame's tones sit, not only on how far apart
+    # they are: the same S steepens a spread centred on mid-grey and barely
+    # touches one crowded into the shadows, so solving a curve for the spread
+    # his exports have (solve_contrast) needs both ends. Additive keys, like
+    # wb_green: `range` means what it always meant, so MEASURE_SCHEMA stays,
+    # and a row measured before these were kept is read with its ends placed
+    # either side of its median (spread_ends says so).
+    m["L_p5"], m["L_p95"] = p5, p95
     mx = img.max(axis=2)
     m["clip"] = float((mx >= 250).mean())
     m["black"] = float((mx <= 3).mean())
     neutral = (np.hypot(A, B) < 18) & (L > 25) & (L < 85)
     if neutral.mean() > 0.005:
         m["cast_a"], m["cast_b"] = float(A[neutral].mean()), float(B[neutral].mean())
-        # The same reading in polar form, which is how the tolerance is
-        # published: a neutral surface reads a* = b* = 0 by construction, and
-        # ISO 12647-7 allows a contract proof an average delta-H of 1.5 on
-        # its grey-balance patches (PUBLISHED.NEUTRAL_C_MAX). The distance is
-        # what says whether a cast is visible; the angle says which way it
-        # runs, and a green-yellow fluorescent cast runs near 120 degrees.
-        m["neutral_C"] = float(math.hypot(m["cast_a"], m["cast_b"]))
-        m["neutral_h"] = float(math.degrees(math.atan2(m["cast_b"], m["cast_a"])) % 360.0)
+    # The grey of the room, read so that it answers that question and no
+    # other. cast_a / cast_b above are inputs to fitted models (WB_FEATS,
+    # VENUE_FEATS, EXPO_FEATS, FEATS) and every finished frame he has is stored
+    # measured that way, so they stay exactly as they are. But as a reading of
+    # the light they are two readings mixed: a mean over a window centred on
+    # zero is pulled toward zero by the window itself (on synthetic scenes it
+    # reports about three quarters of a small cast and tops out near b* +10
+    # however strong the cast gets), and skin, which sits at C* 15-25, falls
+    # inside that window whenever the camera has already balanced the light,
+    # adding a* +1 to +3 on a frame where faces are a fifth of the picture --
+    # the size of the difference that tells one venue from another. So the
+    # notes read this instead: the MEDIAN over the same window, with every
+    # face box and a quarter of its size around it left out. On the same
+    # synthetic scenes it tracks the true cast with R^2 0.89 (a*) and 0.80
+    # (b*) where the mean reads 0.54 and 0.49. It is reported and nothing
+    # learns from it; whether it should replace cast_a/cast_b in the models
+    # is a question for held-out frames of his, and a MEASURE_SCHEMA bump.
+    # (neutral_C / neutral_h stood here, compared in a comment with ISO
+    # 12647-7's 1.5 delta-H; nothing read them, and the estimator's own noise
+    # on a near-neutral frame is several times that, so the comparison was
+    # never one the number could support.)
+    keep = neutral.copy()
+    for f in faces:
+        x, y, fw, fh = [int(v) for v in f.box]
+        mx_, my_ = fw // 4, fh // 4
+        keep[max(0, y - my_):max(0, y + fh + my_), max(0, x - mx_):max(0, x + fw + mx_)] = False
+    if keep.mean() > 0.005:
+        ga, gb = float(np.median(A[keep])), float(np.median(B[keep]))
+        m.update(grey_a=ga, grey_b=gb, grey_C=float(math.hypot(ga, gb)),
+                 grey_h=float(math.degrees(math.atan2(gb, ga)) % 360.0))
     # Coloured light sources: chroma of the bright pixels.
     bright = L > 80
     if bright.mean() > 0.002:
@@ -1290,14 +1997,18 @@ def measure(img: np.ndarray, faces: list, box) -> dict:
     fl, rg, fa, fb = [], [], [], []
     for f in faces:
         x, y, fw, fh = [int(v) for v in f.box]
-        inner = img[y + int(0.2 * fh):y + int(0.85 * fh), x + int(0.2 * fw):x + int(0.8 * fw)]
+        # Not skin_rect's patch, on purpose. face_L, face_a, face_b and
+        # face_rg are inputs to fitted models (taste.FEATS, and WB_FEATS
+        # through the hue of face_a and face_b), and every finished frame he
+        # has is stored measured on this patch; moving it would change what
+        # those stored numbers mean, not how finely they are read.
+        rows, cols = slice(y + int(0.2 * fh), y + int(0.85 * fh)), slice(x + int(0.2 * fw), x + int(0.8 * fw))
+        inner = img[rows, cols]
         if inner.size < 100:
             continue
-        ilab = cv2.cvtColor(inner, cv2.COLOR_BGR2LAB).astype(np.float32)
-        li = ilab[..., 0] * (100 / 255)
-        fl.append(float(np.percentile(li, 50)))
-        fa.append(float(np.median(ilab[..., 1] - 128)))
-        fb.append(float(np.median(ilab[..., 2] - 128)))
+        fl.append(float(np.median(L[rows, cols])))
+        fa.append(float(np.median(A[rows, cols])))
+        fb.append(float(np.median(B[rows, cols])))
         b, g, r = inner.reshape(-1, 3).mean(axis=0)
         rg.append(float(r / max(g, 1.0)))
     if fl:
@@ -1306,55 +2017,55 @@ def measure(img: np.ndarray, faces: list, box) -> dict:
         # locus skin occupies in every photograph ever taken, not against taste.
         m["face_a"], m["face_b"] = float(np.median(fa)), float(np.median(fb))
     # The largest main face on its own, which is where yellow light shows
-    # (the medians above pool every face). Kept only when it is skin-lit
-    # (L* 12-85, as learn_colour reads his exports).
+    # (the medians above pool every face). Read by skin_patch, the patch and
+    # the guard his delivered skin is read by, because being set beside that
+    # is what these numbers are for: frame_tones prints this face's hue
+    # against his skin_hue, and taste.sure_face decides from them whether
+    # there is a face to do it on. Kept only when it is skin-lit (L* 12-85),
+    # the same guard as his exports. The frame store keeps them with the
+    # rest of measure(), but nothing fitted reads them and nothing reads them
+    # back out of it (frame_tones reads each frame fresh), so the patch could
+    # move to meet the export side's without the schema moving with it.
     big = max(faces, key=lambda f: f.box[2] * f.box[3]) if faces else None
-    if big is not None:
-        x, y, fw, fh = [int(v) for v in big.box]
-        inner = img[y + int(0.2 * fh):y + int(0.85 * fh), x + int(0.2 * fw):x + int(0.8 * fw)]
-        if inner.size >= 100:
-            ilab = cv2.cvtColor(inner, cv2.COLOR_BGR2LAB).astype(np.float32)
-            Lb = float(np.median(ilab[..., 0]) * (100 / 255))
-            if 12 <= Lb <= 85:
-                Ab, Bb = ilab[..., 1] - 128, ilab[..., 2] - 128
-                ab, bb = float(np.median(Ab)), float(np.median(Bb))
-                m.update(face_L_big=Lb, face_a_big=ab, face_b_big=bb, face_C_big=math.hypot(ab, bb),
-                         face_hue_big=math.degrees(math.atan2(bb, ab)), face_conf_big=float(getattr(big, "conf", 1.0)))
-                # The SECOND face statistic, from the same patch, because the
-                # published lightness numbers are not all measured the same
-                # way. face_L_big above is the median of the face box, which
-                # is what Peng's preferred L* is comparable to. This one is
-                # the lit diffuse patch the broadcast work measures: ITU-R
-                # BT.2408-8 Annex 4 reads forehead and cheek with specular
-                # shine excluded, and its own Annex 1 reads whole segmented
-                # skin on the same faces about 1.1 stop lower. A specular
-                # highlight is bright AND desaturated (it takes the
-                # illuminant's colour), so both conditions have to hold
-                # before a pixel is dropped as shine; dropping on lightness
-                # alone also throws away bright diffuse skin, and the two
-                # definitions differ by about 4 L* on his delivered faces.
-                # This is REPORTED against PUBLISHED.LIT_L_LO/HI and never
-                # corrected toward -- no decision in this file reads it.
-                Lp = ilab[..., 0] * (100 / 255)
-                Cp = np.hypot(Ab, Bb)
-                shine = (Lp >= np.percentile(Lp, 97)) & (Cp <= np.percentile(Cp, 25))
-                lit = Lp[~shine]
-                if lit.size:
-                    # The MEAN, because that is the statistic the number it
-                    # gets printed beside was measured as: BT.2408-8 Annex 4
-                    # averages 50x50 px forehead-and-cheek patches over 713
-                    # faces. It was a p75, which is a different instrument
-                    # and read a median 59.8 where the mean of the same
-                    # pixels read 47.2, flipping the "inside the broadcast
-                    # band" verdict on 14 of 40 faces on the choice of
-                    # statistic alone. It is still not the same PATCH -- this
-                    # is the whole face box less shine, not forehead and
-                    # cheek -- so the note reports the two side by side and
-                    # no longer says "inside" or "outside".
-                    m["face_lit_L"] = float(np.mean(lit))
-                    m["face_lit_from"] = ("mean of the face box with shine dropped (pixels both in the top 3% of L* "
-                                          "and the bottom quartile of chroma); BT.2408 reads forehead and cheek, so "
-                                          "the statistic matches and the patch does not")
+    got = skin_patch(L, A, B, big.box) if big is not None else None
+    if got is not None:
+        Lb, ab, bb = got
+        m.update(face_L_big=Lb, face_a_big=ab, face_b_big=bb, face_C_big=math.hypot(ab, bb),
+                 face_hue_big=math.degrees(math.atan2(bb, ab)), face_conf_big=float(getattr(big, "conf", 1.0)))
+        # The SECOND face statistic, from the same patch, because the
+        # published lightness numbers are not all measured the same way.
+        # face_L_big above is the median of the middle of the face box, which
+        # is what Peng's preferred L* is comparable to. This one is the lit
+        # diffuse patch the broadcast work measures: ITU-R BT.2408-8 Annex 4
+        # reads forehead and cheek with specular shine excluded, and its own
+        # Annex 1 reads whole segmented skin on the same faces about 1.1 stop
+        # lower. A specular highlight is bright AND desaturated (it takes the
+        # illuminant's colour), so both conditions have to hold before a
+        # pixel is dropped as shine; dropping on lightness alone also throws
+        # away bright diffuse skin, and the two definitions differ by about
+        # 4 L* on his delivered faces. This is REPORTED against
+        # PUBLISHED.LIT_L_LO/HI and never corrected toward -- no decision in
+        # this file reads it.
+        rows, cols = skin_rect(big.box)
+        Lp = L[rows, cols]
+        Cp = np.hypot(A[rows, cols], B[rows, cols])
+        shine = (Lp >= np.percentile(Lp, 97)) & (Cp <= np.percentile(Cp, 25))
+        lit = Lp[~shine]
+        if lit.size:
+            # The MEAN, because that is the statistic the number it gets
+            # printed beside was measured as: BT.2408-8 Annex 4 averages
+            # 50x50 px forehead-and-cheek patches over 713 faces. It was a
+            # p75, which is a different instrument and read a median 59.8
+            # where the mean of the same pixels read 47.2, flipping the
+            # "inside the broadcast band" verdict on 14 of 40 faces on the
+            # choice of statistic alone. It is still not the same PATCH --
+            # this is the middle of the face box less shine, not forehead and
+            # cheek -- so the note reports the two side by side and no longer
+            # says "inside" or "outside".
+            m["face_lit_L"] = float(np.mean(lit))
+            m["face_lit_from"] = ("mean of the middle of the face box with shine dropped (pixels both in the top 3% "
+                                  "of L* and the bottom quartile of chroma); BT.2408 reads forehead and cheek, so "
+                                  "the statistic matches and the patch does not")
     # The subject, whatever it is: its box, or the middle of the frame.
     if box is not None:
         x, y, bw, bh = box
@@ -1366,8 +2077,11 @@ def measure(img: np.ndarray, faces: list, box) -> dict:
     return m
 
 
-def decide(ms: list[dict], kelvins: list[float], isos: list[int], subject: str, light: str) -> tuple[dict, list[str]]:
-    """Measurements plus what the scene is -> preset settings, and the notes that explain them."""
+def decide(ms: list[dict], kelvins: list[float], isos: list[int], subject: str, light: str,
+           greens: list[float] | None = None) -> tuple[dict, list[str]]:
+    """Measurements plus what the scene is -> preset settings, and the notes that explain them.
+    `greens` are the frames' wb_green readings (camera_wb_from_raw), said
+    beside the kelvin and never acted on here."""
     s: dict = {}
     notes: list[str] = []
     med = lambda k: statistics.median(m[k] for m in ms if k in m)  # noqa: E731
@@ -1429,16 +2143,32 @@ def decide(ms: list[dict], kelvins: list[float], isos: list[int], subject: str, 
     #    that used to be computed here from the neutral cast, in DxO's units
     #    with a coefficient nobody could check, was one of the two things that
     #    turned skin red. What was measured is still said, for the notes.
+    #    The camera's green reading goes beside its kelvin, as a number and
+    #    always, with no threshold under which it is not said. A threshold
+    #    would be a claim about how much green is enough to matter, and
+    #    nothing here can check one: the reading is in the camera's own space,
+    #    it drifts somewhat with the kelvin even on the locus, and the only
+    #    thing that says what it means is his own Fluo decisions, which the
+    #    per-frame model weighs (taste.learn_wb). So it is reported, and
+    #    reading it is his.
     s.pop("_warm", None)
     if kelvins:
         k = statistics.median(kelvins)
-        notes.append(f"camera as-shot about {k:.0f} K; left as shot, each frame switches to Fluo on its own evidence")
-    if have("cast_b"):
-        cb = med("cast_b")
+        g = statistics.median(greens) if greens else None
+        tilt = "" if g is None else f", {abs(g):.2f} stop {'greener' if g >= 0 else 'more magenta'} than its own daylight balance"
+        notes.append(f"camera as-shot about {k:.0f} K{tilt}; left as shot, each frame switches to Fluo on its own evidence")
+    # Said off the grey with the faces left out (measure(), grey_a/grey_b),
+    # which reads the light rather than the light plus the skin in it; the
+    # model inputs cast_a/cast_b stand in only for a frame measured before
+    # it existed. A note is not learned from, so it may read the better
+    # instrument before the models do.
+    ga, gb = ("grey_a", "grey_b") if have("grey_b") else ("cast_a", "cast_b")
+    if have(gb):
+        cb = med(gb)
         if abs(cb) > 4:
             notes.append(f"neutrals read {'yellow' if cb > 0 else 'blue'} (b* {cb:+.0f})")
-    if have("cast_a"):
-        ca = med("cast_a")
+    if have(ga):
+        ca = med(ga)
         if abs(ca) > 5:
             notes.append(f"neutrals read {'magenta' if ca > 0 else 'green'} (a* {ca:+.0f})")
 
@@ -1481,9 +2211,134 @@ def decide(ms: list[dict], kelvins: list[float], isos: list[int], subject: str, 
 # ------------------------------------------------------------- main
 
 def default_out(folder: Path) -> Path:
-    """A shoot laid out as <shoot>/raw keeps its cull beside the RAWs, not inside
-    them, so PhotoLab never indexes the picks twice."""
-    return folder.parent / "cull" if folder.name == "raw" else folder / "_cull"
+    """The shoot's cull folder, by the one rule (library.paths): cull/ beside
+    raw/ on a standard shoot, cull/ or an old _cull/ on a flat one, whichever
+    holds cull.csv, and whichever of the shoot, its raw/ or its cull/ was
+    pointed at.
+
+    This used to answer "<folder>/_cull" for anything not named raw without
+    looking, so `pl presets` on a flat shoot whose cull is in cull/, or on a
+    standard shoot's own folder, stopped at "no cull.csv" with the cull right
+    there. Kept by name because other callers ask it."""
+    return library.paths(folder).cull
+
+
+def frame_file(shoot: Path, name: str) -> Path:
+    """The file a cull.csv row is, for reading pixels, white balance and EXIF
+    off: its RAW, found by number whatever extension the cull wrote down
+    (library.frame_raw), else the name the cull wrote down, exactly as before.
+
+    cull.csv can name the camera JPEG it decoded (TSC04016.jpg) where raw/
+    holds TSC04016.ARW, and `shoot / r["file"]` then read the JPEG, or
+    nothing, and never the sensor. When no RAW of that number is here the
+    fallback is the old path on purpose, so measuring a frame whose RAW is
+    gone degrades exactly as it always has."""
+    return library.frame_raw(shoot, name) or Path(shoot) / name
+
+
+def frame_owner(shoot: Path, name: str) -> Path | None:
+    """The file whose sidecar this cull.csv row gets, or None when there is
+    none to give it one beside.
+
+      1. its RAW, found by number (library.frame_raw): TSC04016.ARW for a row
+         the cull named TSC04016.jpg, so the sidecar is TSC04016.ARW.dop,
+         library.sidecar_path's answer, and not TSC04016.jpg.dop;
+      2. else the file the cull named, when it is itself here - a frame shot
+         as JPEG only, whose sidecar sits beside the JPEG PhotoLab opens, the
+         rule gather keeps (an exact JPEG remains a JPEG) - or when the name
+         is a RAW's. A RAW archived to iCloud and evicted, or on a card not
+         mounted, is away and not gone: its sidecars stay in raw/ (459 of
+         them on 2026-09-16) under the name it comes back to, and they are
+         written and brought up to date there exactly as they always were
+         (test_sidecar's unreadable-frame cases pin that).
+
+    Nothing else: a row that names a JPEG which is not here, with no RAW of
+    its number either. Its sidecar would sit beside no file, one PhotoLab
+    never opens under a name no RAW will ever have - which is what every
+    earlier run left behind as TSC04016.jpg.dop, while the RAW got none."""
+    raw = library.frame_raw(shoot, name)
+    if raw is not None:
+        return raw
+    own = Path(shoot) / name
+    if own.exists() or own.suffix.lower() in RAW_EXTS:
+        return own
+    return None
+
+
+def orphan_sidecars(folder: Path) -> list[Path]:
+    """The .dop files named for a camera JPEG (TSC04016.jpg.dop) with no such
+    JPEG beside them: what earlier runs wrote at `shoot / r["file"]` for a
+    cull that named the JPEG. PhotoLab opens none of them. They are counted
+    and never deleted or moved: one may be the only record of an edit of the
+    photographer's (frame_hand reads it as his)."""
+    try:
+        return sorted(f for f in Path(folder).glob("*.dop")
+                      if Path(f.name[:-4]).suffix.lower() in JPEG_EXTS and not (f.parent / f.name[:-4]).exists())
+    except OSError:
+        return []
+
+
+_ORPHANS_SAID: set[str] = set()
+
+
+def say_orphans(folder: Path) -> None:
+    """One line per folder per run, however many scenes write into it."""
+    key = str(Path(folder).resolve())
+    if key in _ORPHANS_SAID:
+        return
+    _ORPHANS_SAID.add(key)
+    found = orphan_sidecars(folder)
+    if not found:
+        return
+    his = sum(1 for f in found if is_his(f.read_text(errors="ignore")))
+    n = len(found)
+    print(f"  {n} sidecar{'s' if n != 1 else ''} named for a camera JPEG ({found[0].name}"
+          f"{', ...' if n > 1 else ''}) in {Path(folder).resolve()}, written there by an earlier run beside no file: "
+          f"PhotoLab never opens {'them' if n != 1 else 'it'}, so {'they are' if n != 1 else 'it is'} not used and "
+          f"{'were' if n != 1 else 'was'} left in place"
+          + (f"; {his} carr{'y' if his != 1 else 'ies'} your own edits and {'are' if his != 1 else 'is'} read as "
+             f"{'their' if his != 1 else 'its'} RAW's copy of your hand until the RAW has a sidecar of its own" if his else ""))
+
+
+def say_no_raw(shoot: Path, names: list) -> None:
+    """The frames that got no sidecar because nothing of theirs is here
+    (frame_owner), in one line for the run, not one per scene."""
+    if not names:
+        return
+    n = len(names)
+    p = library.paths(shoot)
+    print(f"  {n} frame{'s' if n != 1 else ''} got no sidecar ({names[0]}{', ...' if n > 1 else ''}): the cull "
+          f"names {'JPEGs' if n != 1 else 'a JPEG'} not in {p.raw}, and no RAW of {'their numbers' if n != 1 else 'its number'} "
+          f"is there or in edit/ or {p.picks.relative_to(p.shoot)}/; a sidecar beside no file is one no editor ever opens")
+
+
+def frame_sidecar(shoot: Path, name: str, mine_too: bool = False) -> tuple[Path | None, Path | None]:
+    """(where this cull.csv row's .dop is written, the photographer's copy of
+    it or None), for build and write_dops to ask the same question.
+
+    The .dop is None when frame_owner finds nothing to put it beside, and
+    the frame is then skipped rather than given a file PhotoLab never opens.
+    His copy is newest_hand's, asked by the RAW's name; failing that, an
+    orphan <cull name>.dop beside the RAW (orphan_sidecars) that carries his
+    hand, but only while the RAW has no sidecar of its own. An earlier run
+    wrote the orphan where the RAW's should have been; if his hand is in it
+    - the JPEG it is named for was beside it when he opened that in
+    PhotoLab, and has gone since - passing it over would write the machine's
+    opinion onto the RAW as though he had decided nothing. With --mine-too
+    no copy is his to keep, the same as before."""
+    held = newest_hand(shoot, name)
+    owner = frame_owner(shoot, name)
+    if owner is None:
+        return None, None
+    dop = owner.with_name(owner.name + ".dop")
+    if held is None and not dop.exists() and owner.name != name:
+        for folder in dict.fromkeys((Path(shoot), owner.parent)):
+            orphan = folder / f"{name}.dop"
+            if (Path(name).suffix.lower() in JPEG_EXTS and orphan.exists() and not (folder / name).exists()
+                    and is_his(orphan.read_text(errors="ignore"))):
+                held = orphan
+                break
+    return dop, (None if mine_too else held)
 
 
 def load_rows(cull_csv: Path) -> list[dict]:
@@ -1522,7 +2377,7 @@ def tag(probs: np.ndarray, table: list) -> tuple[str, float, list[str]]:
 
 
 def write_for_editor(shoot: Path, rows: list[dict], name: str, settings: dict, notes: list,
-                     editor: str, force: bool = False, quiet: bool = False) -> int:
+                     editor: str, force: bool = False, quiet: bool = False, no_raw: list | None = None) -> int:
     """The same starting edit, in another editor's sidecar. DxO is handled by
     write_dops, which has to splice PhotoLab's own preset format; these three are
     written from the neutral Edit in editors.py.
@@ -1533,12 +2388,22 @@ def write_for_editor(shoot: Path, rows: list[dict], name: str, settings: dict, n
     cull's stars reached darktable for none of the 198 frames in the 2026-09-05
     shoot, and the file landed on top of the Lightroom sidecar besides. It also
     replaced whatever was already there under --force, which is the one thing
-    the .dop path will not do."""
+    the .dop path will not do.
+
+    Beside the frame's RAW, found by number (frame_owner), for the reason the
+    .dop is: a cull that named TSC04016.jpg sent darktable's sidecar to
+    TSC04016.jpg.xmp beside nothing. A frame with nothing here to put one
+    beside gets none, and its name goes on `no_raw` for the run to say once
+    (say_no_raw); a caller that passes no list hears it from here."""
     import editors as ed
     e = ed.from_dxo(name, settings, notes)
     wrote = kept = 0
+    skipped: list = [] if no_raw is None else no_raw
     for r in rows:
-        raw = shoot / r["file"]
+        raw = frame_owner(shoot, r["file"])
+        if raw is None:
+            skipped.append(r["file"])
+            continue
         rating = min(3, int(r.get("rating") or 0))    # the cull's 5 is a tier, never five stars
         out = ed.sidecar_path(editor, raw)
         if out.exists() and not force:
@@ -1555,6 +2420,8 @@ def write_for_editor(shoot: Path, rows: list[dict], name: str, settings: dict, n
         wrote += 1
     if kept and not quiet:
         print(f"  {kept} sidecar{'s' if kept != 1 else ''} your editor wrote: left as {'they are' if kept != 1 else 'it is'}")
+    if no_raw is None and not quiet:
+        say_no_raw(shoot, skipped)
     return wrote
 
 
@@ -1582,11 +2449,15 @@ def build(shoot: Path, out_dir: Path, install: bool = False, xmp: bool = False, 
         if not picks:
             continue
         sample = sorted(picks, key=lambda r: -float(r["quality"]))[:MAX_FRAMES]
-        ms, kelvins, imgs = [], [], []
+        ms, kelvins, greens, imgs = [], [], [], []
         for r in sample:
             stem = Path(r["file"]).stem
             pv = previews / f"{stem}.jpg"
-            img = cv2.imread(str(pv)) if pv.exists() else decode(shoot / r["file"], out_dir / "decoded" / f"{stem}.jpg")
+            # The RAW behind the row, whatever name the cull gave it
+            # (frame_file): a cull that named the camera JPEG read no
+            # camera white balance off any frame of the scene.
+            src = frame_file(shoot, r["file"])
+            img = cv2.imread(str(pv)) if pv.exists() else decode(src, out_dir / "decoded" / f"{stem}.jpg")
             if img is None:
                 continue
             h, w = img.shape[:2]
@@ -1595,30 +2466,32 @@ def build(shoot: Path, out_dir: Path, install: bool = False, xmp: bool = False, 
             faces = [f for f in judge.detect(img) if f.main]
             ms.append(measure(img, faces, reader.subject_box(img)))
             imgs.append(img)
-            if (shoot / r["file"]).suffix.lower() in RAW_EXTS:
-                k = kelvin_from_raw(shoot / r["file"])
+            if src.suffix.lower() in RAW_EXTS:
+                k, gr = camera_wb_from_raw(src)
                 if k:
                     kelvins.append(k)
+                if gr is not None:
+                    greens.append(gr)
         if not ms:
             continue
         ps, pl = reader.classify(imgs)
         isos: list[int] = []
         try:
-            ex = json.loads(subprocess.run([EXIFTOOL, "-j", "-ISO", *[str(shoot / r["file"]) for r in sample]],
+            ex = json.loads(subprocess.run([EXIFTOOL, "-j", "-ISO", *[str(frame_file(shoot, r["file"])) for r in sample]],
                                            capture_output=True, text=True).stdout or "[]")
             isos = [int(e["ISO"]) for e in ex if str(e.get("ISO", "")).isdigit()]
         except Exception:  # noqa: BLE001
             pass
-        measured.append({"scene": scene_id, "rows": rs, "picks": picks, "ms": ms, "kelvins": kelvins, "isos": isos,
+        measured.append({"scene": scene_id, "rows": rs, "picks": picks, "ms": ms, "kelvins": kelvins, "greens": greens, "isos": isos,
                          "ps": ps, "pl": pl, "start": min(r["shot_at"] for r in picks)})
 
     def settle(g: dict) -> None:
         g["subject"], g["subject_p"], g["subject_also"] = tag(g["ps"], SUBJECTS)
         g["light"], g["light_p"], g["light_also"] = tag(g["pl"], LIGHTS)
-        g["settings"], g["notes"] = decide(g["ms"], g["kelvins"], g["isos"], g["subject"], g["light"])
+        g["settings"], g["notes"] = decide(g["ms"], g["kelvins"], g["isos"], g["subject"], g["light"], greens=g["greens"])
 
     def absorb(g: dict, m: dict) -> None:
-        for k in ("rows", "picks", "ms", "kelvins", "isos"):
+        for k in ("rows", "picks", "ms", "kelvins", "greens", "isos"):
             g[k] = g[k] + m[k]
         g["ps"] = np.vstack([g["ps"], m["ps"]]) if len(m["ps"]) else g["ps"]
         g["pl"] = np.vstack([g["pl"], m["pl"]]) if len(m["pl"]) else g["pl"]
@@ -1666,11 +2539,12 @@ def build(shoot: Path, out_dir: Path, install: bool = False, xmp: bool = False, 
         for old in DXO_PRESETS.glob(".Cull *.preset.*.tmp"):
             old.unlink()
     report: list[dict] = []
+    no_raw: list[str] = []          # frames given no sidecar, said once after every scene (say_no_raw)
     xmp_tagged = xmp_kept = 0
     # With finished edits of the photographer's on this shoot the look is learned from them;
     # without, a shoot gets DxO's own camera-body rendering and only what the
     # sensor decides. The first frame the photographer finishes here sets the face target.
-    top = shoot.parent if shoot.name == "raw" else shoot
+    top = library.paths(shoot).shoot
     venue = taste.venue_for(top) if dop and editor == "dxo" else None
     if venue is None and dop and editor == "dxo" and measured:
         # Not a finished venue itself: the nearest finished venue this shoot
@@ -1738,10 +2612,15 @@ def build(shoot: Path, out_dir: Path, install: bool = False, xmp: bool = False, 
                 # --force a frame with a sidecar (the pipeline's or the
                 # photographer's) is skipped by write_dops, and measuring it
                 # first was a minute of RAW decoding for nothing on a re-run.
-                need = targets if force else [r for r in targets
-                                              if not (shoot / f"{r['file']}.dop").exists() and (mine_too or newest_hand(shoot, r["file"]) is None)]
-                if len(need) < len(targets) and not quiet:
-                    print(f"  {len(targets) - len(need)} of {len(targets)} frames already carry a sidecar: left as they are (--force refreshes them)")
+                # Nor is a frame that will get no sidecar at all, having
+                # nothing here to put one beside (frame_sidecar): write_dops
+                # skips it and the run says so once, at the end.
+                sides = {r["file"]: frame_sidecar(shoot, r["file"], mine_too) for r in targets}
+                placed = [r for r in targets if sides[r["file"]][0] is not None]
+                need = placed if force else [r for r in placed
+                                             if not sides[r["file"]][0].exists() and sides[r["file"]][1] is None]
+                if len(need) < len(placed) and not quiet:
+                    print(f"  {len(placed) - len(need)} of {len(placed)} frames already carry a sidecar: left as they are (--force refreshes them)")
                 tones = frame_tones(shoot, out_dir, need, g["settings"], g["light"], judge, reader, quiet=quiet, learned=learned, target_L=target_L, venue=venue, base_name=base_name) if need else {}
                 # What was decided on each frame, for the studio to show under it.
                 g["decided"] = {Path(f).stem: t.get("_note", "") for f, t in tones.items() if t.get("_note")}
@@ -1758,9 +2637,10 @@ def build(shoot: Path, out_dir: Path, install: bool = False, xmp: bool = False, 
                 g["left_alone"] = []
                 wrote = write_dops(shoot, out_dir, targets, name, text, [f"Scene {i:02d}"], force=force, crop=crop, level=level,
                                    judge=judge if crop else None, tones=tones, mine_too=mine_too, base_name=base_name,
-                                   left_alone=g["left_alone"])
+                                   left_alone=g["left_alone"], no_raw=no_raw)
             else:
-                wrote = write_for_editor(shoot, targets, name, g["settings"], g["notes"], editor, force=force, quiet=quiet)
+                wrote = write_for_editor(shoot, targets, name, g["settings"], g["notes"], editor, force=force, quiet=quiet,
+                                         no_raw=no_raw)
             g["dops"] = wrote
         if xmp:
             t, k = tag_xmp(shoot, [Path(r["file"]).stem for r in g["picks"]], f"Scene {i:02d}")
@@ -1775,6 +2655,8 @@ def build(shoot: Path, out_dir: Path, install: bool = False, xmp: bool = False, 
                        "left_alone": sorted(g.get("left_alone") or [])})
         if not quiet:
             print(f"  {name}: " + "; ".join(g["notes"][:3]) + (f"; {g['dops']} sidecar{'s' if g['dops'] != 1 else ''}" if dop else ""))
+    if not quiet:
+        say_no_raw(shoot, no_raw)
     print(f"@@ presets {len(ordered)} {len(ordered)}", flush=True)
     # Nothing is said when nothing changed: a second run over the same shoot
     # finds the scene keyword already where it put it.
@@ -1887,10 +2769,10 @@ def dop_stamp(shoot: Path) -> tuple[str, str, list[str]]:
         notes.append(f"no DxO PhotoLab in /Applications: sidecars are stamped {DOP_SOFTWARE_DEFAULT}, "
                      "the version this file shipped knowing about; PhotoLab rewrites it the first time it opens one")
         software = DOP_SOFTWARE_DEFAULT
-    top = shoot.parent if shoot.name == "raw" else shoot
+    p = library.paths(shoot)
     seen: dict[str, int] = {}
     fallback: dict[str, int] = {}
-    for d in (shoot, top / "cull" / "picks", top / "edit"):
+    for d in (shoot, p.picks, p.edit):
         if not d.is_dir():
             continue
         # Every sidecar in the folder, not the first 500 by name. The cap
@@ -2103,7 +2985,7 @@ def frame_tones(shoot: Path, out_dir: Path, rows: list[dict], settings: dict, li
     # applied any more: on the one shoot they were learned from every manual
     # bias was one paste, and on the next venue the photographer reset every value they
     # wrote. What varies per frame is decided from the sensor below.
-    here = shoot.parent if shoot.name == "raw" else shoot
+    here = library.paths(shoot).shoot
     if not learned:
         local = {}
     elif venue is None or venue[0] == taste.venue_id(here):
@@ -2174,13 +3056,29 @@ def frame_tones(shoot: Path, out_dir: Path, rows: list[dict], settings: dict, li
     venue_wb = finals.get("WhiteBalanceRawPreset")
     consult = consults_wb(venue[1] if venue else None)
     colour = (taste.load() or {}).get("colour") or {}
+    # The Base a frame's sidecar sits on, which is what the colour grade
+    # below starts from wherever this run writes no value of its own: the
+    # preset the learned look is built on (its shipped vibrancy is not
+    # always Natural's 5), or DxO Standard, which a partial Base names.
+    under = preset_base_dict(base_name, settings) if learned else shipped(STANDARD)
     out: dict = {}
     jobs = []
     for r in rows:
         stem = Path(r["file"]).stem
         pv = previews / f"{stem}.jpg"
-        jobs.append((r["file"], str(pv) if pv.exists() else "", str(out_dir / "decoded" / f"{stem}.jpg"), str(shoot / r["file"])))
+        # Keyed by the cull's name, which is what `tones` is keyed by for
+        # write_dops and the studio; read off the RAW behind it (frame_file).
+        jobs.append((r["file"], str(pv) if pv.exists() else "", str(out_dir / "decoded" / f"{stem}.jpg"), str(frame_file(shoot, r["file"]))))
     measured = measure_frames(jobs, progress=None if quiet else (lambda d, n: print(f"@@ tone {d} {n}", flush=True) if d % 25 == 0 or d == n else None))
+    # The light each frame was taken in, from the camera's own settings: the
+    # exposure rules aim a dim frame lower (frame_target) and limit a lift by
+    # the noise it would push (lift_room). One exiftool call for the lot.
+    light = exif_light([j[3] for j in jobs if j[3]])
+    raw_of = {j[0]: j[3] for j in jobs}
+    for name, got in measured.items():
+        raw = raw_of.get(name, "")
+        if got and got.get("lin") is not None and raw in light:
+            got["lin"].update(light[raw])
     for r in rows:
         got = measured.get(r["file"])
         if got is None:
@@ -2195,15 +3093,40 @@ def frame_tones(shoot: Path, out_dir: Path, rows: list[dict], settings: dict, li
             wb = taste.predict_wb(m) if consult else venue_wb
             if wb and wb != "AsShot":
                 per["WhiteBalanceRawPreset"] = wb
-            # A face more than a MAD yellower than his finished skin, said
-            # A face yellower than the delivered ones, said with the number,
-            # whether or not the white balance above already answered it.
+            # A face more than a MAD yellower than his delivered skin, said
+            # with the number, whether or not the white balance above already
+            # answered it. Like for like: face_hue_big is read by skin_patch,
+            # the patch, guard and statistic (the hue of one face's median a*
+            # and b*) that every face behind skin_hue and its MAD was read
+            # by, so the one thing that differs is the rendering -- the
+            # camera's JPEG here, his finished export there -- which is the
+            # thing the note is about.
             hue, mad = colour.get("skin_hue"), colour.get("skin_hue_mad")
             if taste.sure_face(m) and hue is not None and mad and m["face_hue_big"] > hue + mad:
                 notes.append(f"face hue {m['face_hue_big']:.0f} deg on the camera JPEG, "
                              f"{(m['face_hue_big'] - hue) / mad:.1f} MAD above your delivered skin ({hue:.1f} +/- {mad:.1f})"
-                             + (f"; the room's neutrals read b* {m['cast_b']:+.1f}" if m.get("cast_b") is not None else ""))
+                             + (f"; the room's neutrals read b* {m.get('grey_b', m.get('cast_b')):+.1f}"
+                                  if m.get("grey_b", m.get("cast_b")) is not None else ""))
+        if m.get("pop_m3") is not None:
+            # The readings, said on the frame. What acts on them is the
+            # frame's grade below (grade.solve), not this note.
+            import pop as colour_scale
+            got = {k[4:]: v for k, v in m.items() if k.startswith("pop_") and not k.startswith(("pop_sky_", "pop_foliage_"))}
+            for mem in ("sky", "foliage"):
+                sub = {k[len(f"pop_{mem}_"):]: v for k, v in m.items() if k.startswith(f"pop_{mem}_")}
+                if sub:
+                    got[mem] = sub
+            got["m3_words"] = colour_scale.colourfulness_words(m["pop_m3"])
+            notes.append("camera JPEG: " + "; ".join(colour_scale.pop_words(got)))
+        # This frame's targets as his finished exports predict them (the
+        # midtones, a face, the spread of the tones), for the models that
+        # earned their place over the constants on shoots they had not seen
+        # (taste.learn_tone); None per target where the constants still
+        # decide. Only on the learned path: the standard one is DxO's own
+        # rendering with nothing of his in it, and a learned target is his.
+        pred = predicted_tone(m, lin) if learned else {"words": {}}
         if lin is not None:
+            lin["pred"] = pred
             vmode = taste.predict_exposure(venue[1], m) if vexp.get("used") else None
             expo, ev, note = decide_exposure(lin, target, gain=gain, prefer=prefer, band=band,
                                              mode=vmode, why=vwhy if vmode else "")
@@ -2217,7 +3140,7 @@ def frame_tones(shoot: Path, out_dir: Path, rows: list[dict], settings: dict, li
                 note = note[: -len("left to a face mask")] + f"no face large enough for a mask ({MASK_MIN_FRAC:.0%} of the frame), left as it is"
             clipped = [m for m in masks if abs(m.get("short", 0.0)) > 0.005]
             per["_note"] = note + (f"; {len(masks)} face mask{'s' if len(masks) != 1 else ''}"
-                                   + (f", {len(clipped)} of them at the one-stop limit and still "
+                                   + (f", {len(clipped)} of them at the {MASK_MAX_EV:g}-stop limit and still "
                                       + ", ".join(f"{m['short']:+.2f} EV out" for m in clipped) if clipped else "")
                                    if masks else "")
             per["_face_L"] = Lstar(lin["face_Y"]) if lin.get("face_Y") else None
@@ -2240,12 +3163,12 @@ def frame_tones(shoot: Path, out_dir: Path, rows: list[dict], settings: dict, li
             if m.get("face_lit_L") is not None:
                 # Reported beside the broadcast band, never judged against it.
                 # The statistic matches (a mean of non-shine skin) but the
-                # patch does not (a face box, not forehead and cheek), so an
-                # "inside"/"outside" verdict would be a number with no source
-                # ruling on one with a source -- the mismatch PUBLISHED's own
-                # docstring warns about.
+                # patch does not (the middle of a face box, not forehead and
+                # cheek), so an "inside"/"outside" verdict would be a number
+                # with no source ruling on one with a source -- the mismatch
+                # PUBLISHED's own docstring warns about.
                 bits.append(f"lit skin L* {m['face_lit_L']:.0f}, beside the broadcast {PUBLISHED.LIT_L_LO:.0f}-{PUBLISHED.LIT_L_HI:.0f} "
-                            f"(BT.2408-8 Annex 4, forehead and cheek; this is the whole face box less shine, so they are "
+                            f"(BT.2408-8 Annex 4, forehead and cheek; this is the middle of the face box less shine, so they are "
                             f"the same statistic on different patches -- reported, not corrected toward)")
             if gain_note:
                 bits.append(gain_note)
@@ -2257,6 +3180,41 @@ def frame_tones(shoot: Path, out_dir: Path, rows: list[dict], settings: dict, li
                 per["_note"] += "; " + "; ".join(bits)
         elif not learned:
             per["_note"] = "no RAW to measure: exposure left to DxO"
+        # The frame's tone curve (tone_curve): a gentle S, its amplitude
+        # solved on this frame's own tones for the spread his exports are
+        # predicted to have (solve_contrast), or by its light from the
+        # constants where that model is not in use; none where its tones
+        # already spread wide.
+        c, c_why = None, ""
+        ratio = pred.get("spread_ratio")
+        if ratio is not None:
+            c = solve_contrast(float(ratio), m)
+            if c is not None:
+                c_why = f"S-curve {c:.2f} for {(pred.get('words') or {}).get('spread_ratio') or f'tones spread x{ratio:.2f} from your exports'}"
+        curve, curve_why = tone_curve((lin or {}).get("lv"), m.get("range"), c=c, why=c_why)
+        if curve:
+            per["ToneCurveActive"] = True
+            per["ToneCurveMasterPoints"] = curve
+        notes.append("tone: " + curve_why)
+        if m.get("pop_m3") is not None:
+            # This frame's own colour grade (grade.py), on every frame: a lift
+            # toward the preferred chroma for how colourful it already is, sky
+            # and foliage toward their preferred colours, skin held under its
+            # ceiling. Laid on the values this run writes (a venue's look
+            # included), and said on the frame with the scale it planned by.
+            import grade as grade_mod
+            look_hsl = per.get("_hsl") or {}
+            now = {k: (float((look_hsl.get(k.split(".")[1]) or {}).get(k.split(".")[2], 0)) if k.startswith("HSL.")
+                       else float(per.get(k, under.get(k, grade_mod.NATURAL_VIBRANCY))))
+                   for k in grade_mod.CAP}
+            vals, why = grade_mod.solve(m, None, now)
+            for k, v in vals.items():
+                if k.startswith("HSL."):
+                    per.setdefault("_grade_hsl", {})[k] = v
+                else:
+                    per[k] = v
+            if why:
+                notes.append("color: " + "; ".join(why) + (" (slider scale estimated)" if vals else ""))
         if notes:
             per["_note"] = "; ".join(([per["_note"]] if per.get("_note") else []) + notes)
         per["_base"] = "learned" if learned else "standard"
@@ -2302,7 +3260,8 @@ def level_frames(out: dict, quiet: bool = False) -> None:
 
     It moves only what decide_exposure itself would have written: a frame
     set by hand, never one under DxO's highlight recovery, and a bias that
-    stays between BIAS_FLOOR and zero."""
+    stays between BIAS_FLOOR and the frame's own decided lift (zero where
+    there was none)."""
     bursts: dict = {}
     held = 0
     for name, per in out.items():
@@ -2349,11 +3308,14 @@ def level_frames(out: dict, quiet: bool = False) -> None:
             per = out[name]
             was = float(per.get("ExposureBias") or 0.0) if per.get("ExposureActive") else 0.0
             # No further than decide_exposure would go on its own: never
-            # under BIAS_FLOOR, and never a positive global lift, which it
-            # refuses -- a face under the band is its mask's to lift, and a
-            # frame that is dark all over is the photographer's decision. What
-            # that ceiling costs is said on the frame, not dropped.
-            now = round(min(0.0, max(BIAS_FLOOR, was + fix)), 3)
+            # under BIAS_FLOOR, and never above the lift it already wrote on
+            # this frame (zero where it wrote none). A lift is decided from
+            # the frame's own headroom, noise and light level (_expose), and
+            # levelling has none of those to hand, so it may take a lift back
+            # toward the burst but never add one. Clamping at zero, as this
+            # did when decide_exposure never lifted, erased every such lift
+            # on a burst. What that ceiling costs is said on the frame.
+            now = round(min(max(0.0, was), max(BIAS_FLOOR, was + fix)), 3)
             applied = now - was
             short = fix - applied
             bits = []
@@ -2376,7 +3338,8 @@ def level_frames(out: dict, quiet: bool = False) -> None:
 
 def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, preset_text: str, keywords: list[str], force: bool = False,
                crop: str | None = None, level: bool = False, judge=None, tones: dict | None = None, mine_too: bool = False,
-               base_name: str | None = None, measuring: bool = False, left_alone: list | None = None) -> int:
+               base_name: str | None = None, measuring: bool = False, left_alone: list | None = None,
+               no_raw: list | None = None) -> int:
     """One <name>.dop per pick, carrying the scene preset and the cull's star
     rating, so PhotoLab opens the folder with the edit already on every frame.
     Never overwrites a sidecar that exists (that is where your own edits live)
@@ -2384,7 +3347,13 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
 
     `left_alone`, when given, is filled with the stem of every frame skipped
     because a copy of its sidecar carries his hand, so "nothing you had changed
-    was touched" is a list in presets.json rather than a promise on a card."""
+    was touched" is a list in presets.json rather than a promise on a card.
+
+    Each sidecar goes beside the frame's RAW and is named for it
+    (frame_sidecar), TSC04016.ARW.dop for a row the cull named TSC04016.jpg.
+    A frame with nothing here to put one beside gets none; its name goes on
+    `no_raw`, for build to say once for the run, or is said here when no
+    list is passed."""
     # The learned path re-indents the preset's Base into each sidecar. The
     # DxO-Standard path builds its own partial Base per frame and needs none
     # of it: with nothing learned yet the partial preset's Base is empty, and
@@ -2405,9 +3374,14 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
     software, cafid, stamp_notes = dop_stamp(shoot)
     for note in stamp_notes:
         print(f"  {note}")
+    say_orphans(shoot)
+    skipped: list = [] if no_raw is None else no_raw
+    # What exiftool is asked about and what its answer is looked up by: the
+    # RAW behind each row, where the cull's name is only the JPEG.
+    src = {r["file"]: frame_file(shoot, r["file"]) for r in rows}
     try:
         ex = {e["SourceFile"]: e for e in json.loads(subprocess.run(
-            [EXIFTOOL, "-j", "-Orientation#", "-DateTimeOriginal", "-OffsetTimeOriginal", *[str(shoot / r["file"]) for r in rows]],
+            [EXIFTOOL, "-j", "-Orientation#", "-DateTimeOriginal", "-OffsetTimeOriginal", *[str(src[r["file"]]) for r in rows]],
             capture_output=True, text=True).stdout or "[]")}
     except Exception:  # noqa: BLE001
         ex = {}
@@ -2419,10 +3393,12 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
     aside: list[Path] = []
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     # The preset a learned look starts from: the one the photographer's finished sidecars name.
-    preset_base = base_name or taste.venue_base(shoot.parent if shoot.name == "raw" else shoot)
+    preset_base = base_name or taste.venue_base(library.paths(shoot).shoot)
     for r in rows:
-        dop = shoot / f"{r['file']}.dop"
-        hand = None if mine_too else newest_hand(shoot, r["file"])
+        dop, hand = frame_sidecar(shoot, r["file"], mine_too)
+        if dop is None:
+            skipped.append(r["file"])
+            continue
         if not force and (dop.exists() or hand is not None):
             if hand is not None and left_alone is not None:
                 left_alone.append(Path(r["file"]).stem)
@@ -2436,7 +3412,7 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
         # the file, as this once did, left the old recipe under the photographer's edits.
         # --mine-too replaces every copy of it, each one copied aside first.
         hand_text = hand.read_bytes().decode("utf-8", errors="ignore") if hand is not None else ""
-        e = ex.get(str(shoot / r["file"]), {})
+        e = ex.get(str(src[r["file"]]), {})
         # Read once: the crop placement, the template and the patch all have
         # to be told the same thing about how the body was held.
         #
@@ -2508,7 +3484,7 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
         # it -- is a real decision and survives. A frame where he chose
         # nothing keeps whatever the new Base gives it, which for DxO's own
         # preset is AsShot, and 154 of 154 delivered keepers rendered AsShot.
-        delivered = hand_text or (dop.read_text(errors="ignore") if dop.exists() and taste.is_exported(shoot / r["file"]) else "")
+        delivered = hand_text or (dop.read_text(errors="ignore") if dop.exists() and taste.is_exported(src[r["file"]]) else "")
         if delivered:
             wb_was = taste.decided(taste.flat_block(delivered, "Overrides"),
                                    taste.flat_block(delivered, "Base")).get("WhiteBalanceRawPreset")
@@ -2519,6 +3495,7 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
             continue                      # a learned look needs the preset's Base to sit on
         masks = [ai_mask(x) for x in (per.pop("_masks", None) or [])]
         hsl_tables, grading_tables = per.pop("_hsl", None) or {}, per.pop("_grading", None) or {}
+        grade_hsl = per.pop("_grade_hsl", None) or {}
         per = {k: v for k, v in per.items() if not k.startswith("_")}
         if standard:
             # DxO's camera-body rendering, and only what was decided here on top.
@@ -2551,6 +3528,13 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
                 b = set_grading(b, z, f.get("Hue", 0), f.get("Sat", 0), f.get("Lum", 0))
             except KeyError:
                 pass
+        if grade_hsl:
+            # The frame's own grade (frame_tones): written into the HSL table,
+            # which grade.apply adds whole when this Base has none -- the
+            # partial Base on DxO's camera rendering carries no table, and
+            # set_hsl above silently drops a slice it cannot find.
+            import grade as grade_mod
+            b = grade_mod.apply("\n" + b, grade_hsl)[1:]
         for k, v in per.items():
             if isinstance(v, list):
                 b = re.sub(rf"(\t+){k} = \{{.*?\}},\n", lambda m, k=k, v=v: f"{m.group(1)}{k} = {{\n" + "".join(f"{m.group(1)}\t{x},\n" for x in v) + f"{m.group(1)}}},\n", b, count=1, flags=re.S)
@@ -2584,6 +3568,14 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
             # label stood still was a recipe resolved against the wrong
             # preset. His star, his keywords and his dates stay his.
             patched = patch_dop(hand_text, b, display, orientation=patch_orient) or replace_base(hand_text, b)
+            if hand.name != dop.name:
+                # An orphan read as his copy (frame_sidecar) names the JPEG
+                # it was written for; the file it becomes is the RAW's, and
+                # says so. Nothing else of his is moved, and the orphan
+                # itself stays where it is, untouched.
+                patched = re.sub(rf'^(\t+)Name = "{re.escape(hand.name[:-4])}",(\r?)$',
+                                 lambda m, own=dop.name[:-4]: f'{m.group(1)}Name = "{own}",{m.group(2)}', patched,
+                                 count=1, flags=re.M)
             kept_edits += 1
         elif old:
             patched = patch_dop(old, b, display, rating=rating, keywords=kw_list, when=now, orientation=patch_orient)
@@ -2592,7 +3584,7 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
             lens_fixed += 1 if gone else 0
         else:
             text = (DOP_HEAD.replace("{date}", now).replace("{software}", software).replace("{cafid}", cafid)
-                    .replace("{keywords}", kw_frame).replace("{name}", r["file"])
+                    .replace("{keywords}", kw_frame).replace("{name}", dop.name[:-4])
                     .replace("{preset_display}", display)
                     .replace("{orientation}", str(orient)).replace("{rating}", str(rating))
                     + b
@@ -2641,8 +3633,8 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
         # block has anything in it: PhotoLab materialises its own state there
         # on open, and a copy carrying only that was being left behind
         # holding the previous run's recipe.
-        top = shoot.parent if shoot.name == "raw" else shoot
-        for other in (top / "cull" / "picks" / dop.name, top / "edit" / dop.name):
+        top = library.paths(shoot)
+        for other in (top.picks / dop.name, top.edit / dop.name):
             if not other.exists() or other.resolve() == dop.resolve():
                 continue
             theirs = other.read_text(errors="ignore")
@@ -2672,6 +3664,8 @@ def write_dops(shoot: Path, out_dir: Path, rows: list[dict], preset_name: str, p
               "(the RAW would not open, and no sidecar here records it), and a crop placed a quarter turn out is worse than none")
     if lens_fixed:
         print(f"  {lens_fixed} of those had the lens corrections switched off in their own settings (PhotoLab writes that when it opens a sidecar without the lens block): those lines were removed, so DxO's optics module applies")
+    if no_raw is None:
+        say_no_raw(shoot, skipped)
     return n
 
 
@@ -2686,12 +3680,12 @@ def set_aside(shoot: Path, path: Path, stamp: str) -> Path:
     files no machine can rebuild -- in a folder named for the run that
     replaced it, keeping the folder it came from so the three copies of one
     frame stay apart."""
-    top = shoot.parent if shoot.name == "raw" else shoot
+    top = library.paths(shoot)
     try:
-        rel = path.resolve().relative_to(top.resolve())
+        rel = path.resolve().relative_to(top.shoot.resolve())
     except ValueError:
         rel = Path(path.name)
-    dest = decisions_dir(top / "cull") / "replaced" / stamp / rel
+    dest = top.decisions / "replaced" / stamp / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
     write_atomic(dest, path.read_bytes())
     return dest
@@ -2703,8 +3697,14 @@ def newest_hand(raw_dir: Path, name: str) -> Path | None:
 
     taste.newest_hand's answer, which is the learner's: one rule for which
     copy is his, so the writer and the learner cannot disagree about what he
-    decided on the same frame. It is cached per shoot there (hand_copies)."""
-    return taste.newest_hand(raw_dir, name)
+    decided on the same frame. It is cached per shoot there (hand_copies).
+
+    Asked by the RAW's name when there is a RAW of this number here
+    (library.frame_raw): his copies are named for the RAW PhotoLab opened,
+    and a cull that named the camera JPEG asked for TSC04016.jpg.dop, which
+    is his for no frame. With no RAW here the name is passed as given."""
+    raw = library.frame_raw(raw_dir, name)
+    return taste.newest_hand(raw_dir, raw.name if raw is not None else name)
 
 
 # PhotoLab's own lens values when it opens a sidecar, and how two of its values
@@ -2933,7 +3933,7 @@ def write_md(out_dir: Path, report: list[dict], installed: bool) -> None:
          "## Applying them", "",
          "In PhotoLab: select the frames listed for a scene, right-click, **Apply preset**, pick",
          "the `Cull ..` entry. " + ("They are installed in PhotoLab's preset folder; restart it if they are not in the list."
-                                    if installed else "Import them from `_cull/presets/` (Presets panel, Import) or run again with `--install`."),
+                                    if installed else f"Import them from `{out_dir.name}/presets/` (Presets panel, Import) or run again with `--install`."),
          "Then the usual three: exposure to taste, a control point on the subject, crop.", "",
          "The frame lists are the picks; the preset fits the rest of the scene too.", ""]
     for r in report:
@@ -2981,8 +3981,9 @@ def write_md(out_dir: Path, report: list[dict], installed: bool) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("folder", type=Path, help="the shoot (folder of RAWs)")
-    ap.add_argument("--out", type=Path, default=None, help="the cull output folder (default <folder>/_cull)")
+    ap.add_argument("folder", type=Path, help="the shoot: its own folder, its raw/ or its cull/, standard or flat")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="the cull output folder (default the shoot's cull/, or an old flat shoot's _cull/ where that holds cull.csv)")
     ap.add_argument("--install", action="store_true", help="copy the presets into PhotoLab's preset folder")
     ap.add_argument("--xmp", action="store_true",
                     help="tag each pick's XMP sidecar with its scene keyword, at the name Lightroom and Camera Raw "
@@ -2999,11 +4000,16 @@ def main() -> int:
                     help="which editor's sidecar to write. dxo is the full preset; lightroom and rawtherapee get the same starting edit in their own format; darktable gets the rating and label only (see editors.py for why)")
     ap.add_argument("--picks-only", action="store_true", help="with --dop: write sidecars for kept frames only, not for the ones thrown out (what the studio does once you have chosen your keepers)")
     a = ap.parse_args()
-    out = a.out or default_out(a.folder)
+    # The shoot, its raw/ or its cull/, standard or flat: one resolver
+    # (library.paths). This took the folder as raw/ and looked for
+    # <folder>/_cull beside anything else, so a flat shoot's cull/ and a
+    # standard shoot's own folder both stopped at "no cull.csv".
+    p = library.paths(a.folder)
+    out = a.out or p.cull
     if not (out / "cull.csv").exists():
-        print(f"no cull.csv in {out}; run the cull first (./pl cull {a.folder} --keep-previews)")
+        print(f"no cull.csv in {out}; run the cull first (./pl cull {p.raw} --keep-previews)")
         return 1
-    rep = build(a.folder, out, install=a.install, xmp=a.xmp, dop=a.dop, force=a.force, crop=a.crop, level=a.level,
+    rep = build(p.raw, out, install=a.install, xmp=a.xmp, dop=a.dop, force=a.force, crop=a.crop, level=a.level,
                 picks_only=a.picks_only, editor=a.editor, mine_too=a.mine_too)
     print(f"\n  {len(rep)} presets in {out / 'presets'}; notes in {out / 'presets.md'}")
     return 0

@@ -56,6 +56,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import cull as cmod  # noqa: E402
+import library  # noqa: E402
 from common import decision_path  # noqa: E402
 REPO = HERE.parent
 PHOTOS = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
@@ -245,7 +246,7 @@ def shoots() -> list[Path]:
     root = PHOTOS / "shoots"
     if not root.is_dir():
         return []
-    return sorted(p for p in root.iterdir() if p.is_dir() and decision_path(p / "cull", "selects.json").exists())
+    return sorted(p for p in root.iterdir() if p.is_dir() and decision_path(library.cull_dir(p), "selects.json").exists())
 
 
 def shoot_meta(shoot: Path) -> dict:
@@ -271,12 +272,16 @@ def measure(shoot: Path, workers: int, refresh: bool, log=print) -> tuple[list, 
     import faces as fmod
     from common import pool_map
 
-    cull = shoot / "cull"
+    # The shoot's folders by the one resolver (library.paths), so a flat shoot
+    # is measured off its own cull and dated off its own RAWs: this said
+    # cull/ and raw/ whatever the layout, and a flat shoot has no raw/.
+    where = library.paths(shoot)
+    cull = where.cull
     dec_dir, prev_dir = cull / "decoded", cull / "previews"
     stems = sorted(p.stem for p in dec_dir.glob("*.jpg") if not p.name.endswith(".preview.jpg"))
     if not stems:
         return [], {}, "no cached decodes"
-    raw_dir = shoot / "raw"
+    raw_dir = where.raw
 
     # Capture time comes off the RAW while the RAW is still there. Once a
     # shoot is archived, raw/ holds .dop sidecars and nothing else, and this
@@ -622,7 +627,7 @@ def section_shoots(args, log) -> dict:
     for shoot in shoots():
         meta = shoot_meta(shoot)
         label = meta.get("label") or shoot.name
-        chosen = set(Path(c).stem for c in json.loads(decision_path(shoot / "cull", "selects.json").read_text()))
+        chosen = set(Path(c).stem for c in json.loads(decision_path(library.cull_dir(shoot), "selects.json").read_text()))
         frames, judged, src = measure(shoot, args.workers, args.refresh, log)
         if not frames:
             res["shoots"].append({"shoot": label, "note": f"{shoot.name}: no cached decodes; nothing can be measured here"})
@@ -861,7 +866,7 @@ def against_cull_csv(res: dict) -> list[dict]:
     for s in res["shoots"]:
         if "note" in s:
             continue
-        p = PHOTOS / "shoots" / s["dir"] / "cull" / "cull.csv"
+        p = library.cull_dir(PHOTOS / "shoots" / s["dir"]) / "cull.csv"
         if not p.exists():
             continue
         try:
@@ -1260,7 +1265,7 @@ def report(args, res: dict, blink: dict, animals: dict, facechk: list, csvchk: l
     add("  person's taste, and the per-shoot columns exist because the pooled number hides exactly the")
     add("  failure that cost 33 keepers.")
     smoke = PHOTOS / "shoots" / "ducksAndDeadlifts"
-    if smoke.is_dir() and not decision_path(smoke / "cull", "selects.json").exists():
+    if smoke.is_dir() and not decision_path(library.cull_dir(smoke), "selects.json").exists():
         add(f"- **`{_said(smoke)}`** is {len(list(smoke.glob('*.ARW')))} loose ARW with no answer key and no")
         add("  shoot.json: a genuinely unseen shoot. It is a smoke test and not a score, and it has no")
         add("  cull/decoded, so measuring it would mean decoding RAWs into that shoot folder. This harness")

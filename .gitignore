@@ -41,4 +41,3 @@ __pycache__/
 # it - so on any other machine, and in any fresh clone of this one, they were
 # not ignored at all.
 /docs/ml/
-/.claude/

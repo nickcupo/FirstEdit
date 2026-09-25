@@ -179,3 +179,44 @@ def test_the_writer_and_the_learner_find_the_same_copy_of_a_flat_shoots_sidecar(
     dop.write_text("Sources = {\n\t{\n\t\tOverrides = {\n\t\t\tExposureBias = -1.5,\n\t\t},\n\t},\n}\n")
     presets.taste._HANDS.clear()
     assert presets.newest_hand(shoot, "TSC00001.ARW") == dop
+
+
+# ------------------------------------------------------ which shoot, which cull
+
+def _standard(tmp_path: Path) -> Path:
+    s = tmp_path / "2026-09-12-lounge"
+    (s / "raw").mkdir(parents=True)
+    (s / "raw" / "TSC04016.ARW").write_bytes(b"RAW")
+    (s / "cull").mkdir()
+    (s / "cull" / "cull.csv").write_text("file\n")
+    return s
+
+
+def _flat(tmp_path: Path, cull: str) -> Path:
+    s = tmp_path / "ducksAndDeadlifts"
+    (s / cull).mkdir(parents=True)
+    (s / cull / "cull.csv").write_text("file\n")
+    (s / "TSC05691.ARW").write_bytes(b"RAW")
+    return s
+
+
+@pytest.mark.parametrize("layout", ["standard", "flat cull/", "flat _cull/"])
+def test_presets_finds_the_cull_whichever_folder_of_the_shoot_it_is_given(tmp_path, monkeypatch, layout):
+    """default_out answered <folder>/_cull for anything not named raw without
+    looking, so `pl presets` on a flat shoot whose cull is in cull/, or on a
+    standard shoot's own folder, stopped at "no cull.csv" with the cull right
+    there. The shoot, its RAW folder and its cull folder all name one shoot
+    now (library.paths), and main hands build the RAW folder."""
+    s = _standard(tmp_path) if layout == "standard" else _flat(tmp_path, layout.split()[1].rstrip("/"))
+    raw = s / "raw" if layout == "standard" else s
+    cull = s / ("_cull" if layout == "flat _cull/" else "cull")
+    seen = []
+    monkeypatch.setattr(presets, "build", lambda shoot, out, **kw: seen.append((shoot, out)) or [])
+    for pointed in dict.fromkeys((s, raw, cull)):
+        assert presets.default_out(pointed) == cull, pointed
+        monkeypatch.setattr(sys, "argv", ["presets.py", str(pointed)])
+        assert presets.main() == 0
+        assert seen.pop() == (raw, cull)
+    # --out still wins, and a folder with no cull in it still says so.
+    monkeypatch.setattr(sys, "argv", ["presets.py", str(s), "--out", str(tmp_path / "elsewhere")])
+    assert presets.main() == 1 and not seen

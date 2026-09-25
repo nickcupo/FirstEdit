@@ -22,6 +22,8 @@ import csv
 import glob
 from pathlib import Path
 
+import library
+
 HERE_DIRS = ("export", "edit", "reels", "upload")
 # Which export of a frame is its finished photograph: the lowest rank that has
 # one, then the newest within that rank.
@@ -29,27 +31,29 @@ RANK = {"export": 0, "edit": 0, "reels": 2, "upload": 2}
 ICLOUD_RANK = 1
 
 
-def _cull(shoot: Path) -> Path:
-    """The folder this shoot was culled into. A folder that is on disk is
-    believed ahead of the convention: a flat shoot's cull is <shoot>/cull,
-    which is where library.py, reclaim.py and archive.py all look, and
-    `_cull` is the old fork's name, still read wherever one exists. This
-    answered `_cull` for every flat shoot, so on one of those it found no
-    cull.csv and reported that a delivered shoot had no exports at all."""
-    for name in ("cull", "_cull"):
-        if (shoot / name).is_dir():
-            return shoot / name
-    return shoot / "cull" if (shoot / "raw").is_dir() else shoot / "_cull"
-
-
 def frames(shoot: Path) -> dict[str, Path]:
-    """Stem -> the RAW, for every frame the cull knows about."""
-    raw = shoot / "raw" if (shoot / "raw").is_dir() else shoot
-    f = _cull(shoot) / "cull.csv"
+    """Stem -> the RAW, for every frame the cull knows about.
+
+    The cull folder is the one every command reads (library.cull_dir): the
+    one holding cull.csv, then whichever of cull/ and _cull/ is on disk,
+    else cull/. This had a rule of its own that once answered `_cull` for
+    every flat shoot and later took whichever folder existed, so a flat
+    shoot's cull.csv went unread and a delivered shoot reported no exports
+    at all.
+
+    The RAW is found by number (library.frame_raw): the cull can name a
+    frame by the camera JPEG it decoded, and raw/TSC04016.jpg is never there
+    beside raw/TSC04016.ARW, so on such a shoot no iCloud export could be
+    held to a RAW's date and none was ever matched. A frame whose RAW has
+    gone keeps the name the cull gave it, which does not exist, as before."""
+    p = library.paths(shoot)
+    f = p.cull / "cull.csv"
     if not f.exists():
         return {}
+    have = library.raw_index(p.shoot)
     with f.open() as fh:
-        return {Path(r["file"]).stem: raw / r["file"] for r in csv.DictReader(fh)}
+        return {Path(r["file"]).stem: have.get(Path(r["file"]).stem) or p.raw / r["file"]
+                for r in csv.DictReader(fh)}
 
 
 def stem_of(name: str) -> str:
@@ -66,7 +70,7 @@ def files(shoot: Path, want: set[str] | None = None) -> dict[str, Path]:
     this shoot's export/ and edit/ do not have: the studio asks for a wall's
     worth of frames every few seconds while it works, and walking iCloud's
     folders each time bought nothing when every one of them was here."""
-    shoot = Path(shoot)
+    shoot = library.shoot_root(shoot)
     raws = frames(shoot)
     want = set(want) if want is not None else set(raws)
     best: dict[str, tuple[int, float, Path]] = {}

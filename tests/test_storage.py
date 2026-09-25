@@ -761,3 +761,38 @@ def test_the_plan_sheet_shows_why_the_local_raws_stay_and_why_nothing_went_up(tm
     assert plan["ready"] is False
     assert plan["refusals"] == ["iCloud Drive is not turned on on this Mac, so nothing was done. "
                                 "Turn it on in System Settings, then try again."]
+
+
+def test_a_flat_shoot_with_both_culls_takes_the_one_holding_cull_csv(tmp_path):
+    """archive.parts, reclaim and migrate all answer library.paths' rule: of
+    cull/ and _cull/, the one that holds cull.csv. archive.parts took _cull/
+    whenever it existed, and reclaim and migrate took cull/ whenever it did,
+    so a flat shoot with both got different answers - and reclaim, reading
+    cull.csv from an empty cull/, switched off the refusal it exists for."""
+    for holds, empty in (("_cull", "cull"), ("cull", "_cull")):
+        flat = tmp_path / f"flat{holds}"
+        (flat / holds).mkdir(parents=True)
+        (flat / empty).mkdir()
+        (flat / holds / "cull.csv").write_text("file\nDUCK00.ARW\n")
+        (flat / "DUCK00.ARW").write_bytes(b"d")
+        assert archive.parts(flat) == (flat.resolve(), (flat / holds).resolve())
+        assert reclaim.cull_dir(flat) == flat / holds
+        assert set(reclaim.cull_dirs(flat)) == {flat / "cull", flat / "_cull"}
+        assert reclaim.Shoot(flat).cull == (flat / holds).resolve()
+        assert migrate.cull_dir(flat) == flat / holds
+    # A shoot with a raw/ still has the one cull reclaim guarded - and an
+    # _cull/ that is on disk beside it is guarded as well, not missed.
+    std = tmp_path / "2026-01-01-gym"
+    (std / "raw").mkdir(parents=True)
+    assert reclaim.cull_dirs(std) == [std / "cull"]
+    (std / "_cull").mkdir()
+    assert reclaim.cull_dirs(std) == [std / "_cull"]
+    (std / "cull").mkdir()
+    assert reclaim.cull_dirs(std) == [std / "cull", std / "_cull"]
+    # Pointed at a raw/, the migration and the survey act on that folder, as
+    # they always did, and never on the shoot's cull around it.
+    (std / "cull" / "cull.csv").write_text("file\n")
+    assert migrate.cull_dir(std / "raw") != std / "cull"
+    assert std / "cull" not in reclaim.cull_dirs(std / "raw")
+    # And given its raw/, archive answers for the shoot.
+    assert archive.parts(std / "raw") == ((std / "raw").resolve(), (std / "cull").resolve())

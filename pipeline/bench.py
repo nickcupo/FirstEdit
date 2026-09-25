@@ -38,6 +38,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import archive  # noqa: E402
+import library  # noqa: E402
 from common import decision_path, write_atomic  # noqa: E402
 ROOT = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
 OUT = HERE.parent / "tests" / "bench.md"
@@ -45,10 +46,13 @@ OUT = HERE.parent / "tests" / "bench.md"
 
 def run(shoot: Path) -> dict | None:
     # The one canonical answer to "where are this shoot's RAWs and its cull
-    # folder", for both layouts. This file had its own copy, and its copy
-    # called a flat shoot's folder _cull, which is the name nothing else in
-    # the pipeline reads.
-    raw, cull = archive.parts(shoot)
+    # folder", for every layout and whichever of the shoot's folders was
+    # named (library.paths). This file had its own copy, and its copy called
+    # a flat shoot's folder _cull, which is the name nothing new is given;
+    # then it borrowed archive.parts, which took an existing _cull/ over a
+    # cull/ that holds the cull.
+    where = library.paths(Path(shoot).expanduser().resolve())
+    shoot, raw, cull = where.shoot, where.raw, where.cull
     sel = decision_path(cull, "selects.json")
     if not sel.exists():
         return None

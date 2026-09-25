@@ -126,6 +126,7 @@ BURST_GAP = 2.0            # --burst-gap: seconds between frames that starts a n
 MIN_RETEST_PAIRS = 24
 
 from common import MODELS, deal_tiers, stack_tiers, EXIFTOOL, NotEnoughRoom, require_space, write_atomic, write_json_atomic  # noqa: E402
+import library  # noqa: E402
 FACE_MODEL = MODELS / "yunet.onnx"
 SUBJECT_MODEL = MODELS / "object_detection_yolox_2022nov.onnx"
 
@@ -894,7 +895,7 @@ def venue_ranker(shoot: Path, alive: list, judge=None, preview=None) -> dict | N
         if not table:
             return None
         import presets as pmod
-        top = shoot.parent if shoot.name == "raw" else shoot
+        top = library.shoot_root(shoot)
         v = tmod.venue_for(top, table=table)
         if v is None:
             sample = alive[:: max(1, len(alive) // 60)][:60]
@@ -905,7 +906,12 @@ def venue_ranker(shoot: Path, alive: list, judge=None, preview=None) -> dict | N
                     continue
                 faces = [f for f in judge.detect(img) if f.main] if judge is not None else []
                 m = pmod.measure(img, faces, None)
-                m["kelvin"] = pmod.kelvin_from_raw(fr.path) if fr.path.suffix.lower() in RAW_EXTS else None
+                # Both of the camera's readings of the light, from one open of
+                # the RAW, so this pool is the presets step's measurement and
+                # not a thinner copy of it. The venue lookup below reads only
+                # VENUE_FEATS, which wb_green is not in: it is kept, not used.
+                m["kelvin"], m["wb_green"] = (pmod.camera_wb_from_raw(fr.path) if fr.path.suffix.lower() in RAW_EXTS
+                                              else (None, None))
                 pool.append(m)
             mid = {}
             for f in tmod.VENUE_FEATS[:-1] + ["face_a", "face_b"]:
@@ -966,8 +972,8 @@ def record_run(meta_path: Path, style: str, face_floor: float, asked: float | No
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Find the frames worth editing.")
-    ap.add_argument("folder", type=Path)
-    ap.add_argument("--out", type=Path, default=None, help="where picks/ and cull.csv go (default: <shoot>/cull beside a raw/ folder, else <folder>/cull)")
+    ap.add_argument("folder", type=Path, help="the shoot, its raw/ or its cull/: the frames are read from raw/ when the shoot has one, else from the shoot folder")
+    ap.add_argument("--out", type=Path, default=None, help="where picks/ and cull.csv go (default: the shoot's cull/, or an old _cull/ that already holds its cull.csv)")
     ap.add_argument("--burst-gap", type=float, default=BURST_GAP, help="seconds between frames that starts a new burst")
     ap.add_argument("--keep-per-group", type=int, default=0, help="frames of each stack of look-alike frames that are tiered with the rest (default 1, or 2 with --style action); the others stay on the page, set aside under the stack's top")
     ap.add_argument("--top", type=int, default=0, help="keep only the N best picks overall (0 = all best-of-group)")
@@ -1053,23 +1059,36 @@ def main() -> int:
     if not args.keep_per_group:
         args.keep_per_group = 2 if args.style == "action" else 1
 
-    folder = args.folder.expanduser().resolve()
-    if not folder.is_dir():
-        print(f"Not a folder: {folder}", file=sys.stderr)
+    given = args.folder.expanduser().resolve()
+    if not given.is_dir():
+        print(f"Not a folder: {given}", file=sys.stderr)
         return 1
+    # The frames are the shoot's RAW folder whichever of its folders was named
+    # (library.paths): <shoot>/raw when it has one, else the shoot itself. The
+    # studio and the docs hand this <shoot>/raw and a flat shoot is handed as
+    # itself, and both land where they did; `pl cull <shoot>` on a shoot laid
+    # out the standard way listed the shoot folder, found raw/ and cull/ and
+    # no frames, and stopped with "No images", which is the one shape of the
+    # argument every other command takes. A folder that is not a shoot's
+    # (the bench's cull/decoded) is its own RAW folder, as it was.
+    where = library.paths(given)
+    folder = where.raw
     files = sorted(p for p in folder.iterdir() if p.suffix.lower() in RAW_EXTS | JPEG_EXTS)
     if not files:
         print(f"No images in {folder}", file=sys.stderr)
         return 1
-    # <shoot>/cull, the name the rest of the pipeline writes and reads. A folder
-    # of loose frames is its own shoot, so its cull goes inside it; a _cull/
-    # left there by the old fork of this script is still written to rather
-    # than forked a second time beside it.
+    # <shoot>/cull, the name the rest of the pipeline writes and reads, by the
+    # one rule every command reads it by (library.cull_dir): the folder that
+    # holds cull.csv, then whichever of cull/ and _cull/ exists, else cull/.
+    # A folder of loose frames is its own shoot, so its cull goes inside it; a
+    # _cull/ left there by the old fork of this script is still written to
+    # rather than forked a second time beside it, and nothing new is ever
+    # named _cull. This used to be a rule of its own that chose _cull/ only
+    # when no cull/ existed at all, so a flat shoot whose cull was in _cull/
+    # and which some other command had given an empty cull/ was re-culled
+    # into the empty one, and the studio went on reading the old one.
     if args.out is None:
-        if folder.name == "raw":
-            args.out = folder.parent / "cull"
-        else:
-            args.out = folder / ("_cull" if (folder / "_cull").is_dir() and not (folder / "cull").exists() else "cull")
+        args.out = where.cull
     out_dir = args.out.expanduser().resolve()
     print(f"{len(files)} images in {folder.name}")
 
@@ -1647,7 +1666,7 @@ def main() -> int:
     ranker = venue_ranker(folder, alive, judge if "judge" in dir() else None, preview_of)
     if ranker is not None and args.eval:
         import taste as tmod
-        own = tmod.venue_for(folder.parent if folder.name == "raw" else folder)
+        own = tmod.venue_for(library.shoot_root(folder))
         if own is not None and own[1].get("ranker") is ranker:
             print("  --eval on the venue this ranker was learned from: ranked without it, so the bench is not in-sample")
             ranker = None
@@ -1923,7 +1942,10 @@ def main() -> int:
 
     # Record how this cull was run beside the shoot, so the studio shows the
     # settings that actually produced what is on screen even when the cull was
-    # run from the command line.
+    # run from the command line. The cull folder's parent is the shoot the
+    # resolver found (library.paths puts a cull in its shoot, whichever folder
+    # was named), and with --out it is the folder the caller put the cull in:
+    # the studio, the bench and the self-test all hand <shoot>/cull.
     meta_path = out_dir.parent / "shoot.json"
     if not args.dry_run and meta_path.parent.is_dir():
         record_run(meta_path, args.style, face_floor, asked=args.face_floor)

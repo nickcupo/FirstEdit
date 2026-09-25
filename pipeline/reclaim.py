@@ -29,11 +29,13 @@ Nothing here writes to a shoot except `verify --record`, which appends to a
 plain-text manifest, and `reclaim --apply`, which unlinks files inside
 directories the tool itself marked as its own cache.
 
-This module answers from the folders, on its own rules, and imports nothing
-from pipeline/library.py. That is deliberate rather than accidental: it is
-the only thing in the pipeline that can unlink a photograph's last
-rendering, and a second opinion reached independently is worth more here
-than a shared one. The two were written apart and agree on the answer that
+This module answers from the folders, on its own rules, and imports one
+thing from pipeline/library.py: where the shoot's cull is (library.paths).
+The rest is deliberate rather than accidental: it is the only thing in the
+pipeline that can unlink a photograph's last rendering, and a second opinion
+reached independently is worth more here than a shared one. Where the cull
+is, is the exception because it is not an opinion but an address, and two
+answers to it are the hazard rather than the safeguard - cull_dirs says why. The two were written apart and agree on the answer that
 matters - on the dog shoot both refuse the same 292 files (this file
 because no surviving original exists to rebuild them from, library.py
 because no named writer claims them) and both free the same caches.
@@ -51,7 +53,7 @@ Where they differ, and what to reconcile if they are ever merged:
     remove it; only the column it appears in differs.
 
 If they are merged, raw_dir, cull_dirs, cull_dir, stem_of and Shoot are the
-five things to delete, and the two gates in refusals() are the two things
+five things to delete (cull_dir is already library's answer), and the two gates in refusals() are the two things
 that must survive the merge intact.
 """
 
@@ -66,6 +68,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import JPEG_EXTS, RAW_EXTS, for_the_app, human, stop_cleanly_on_sigterm, write_atomic  # noqa: E402
+import library  # noqa: E402
 
 ROOT = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
 
@@ -150,15 +153,36 @@ def cull_dirs(shoot: Path) -> list[Path]:
     13 September, is the other half of the bill: a stray _cull/ beside the dog
     shoot, moved back into cull/ file by file. So this reads both names and
     protects both, which cannot be wrong whichever convention ends up
-    winning."""
+    winning.
+
+    The first of them - the one cull.csv is read from - is library.paths'
+    answer: whichever of cull/ and _cull/ HOLDS a cull.csv. Taken on this
+    file's own order, cull/ whenever it existed, a flat shoot with an empty
+    cull/ some other command made and its real cull in _cull/ read no
+    cull.csv at all, and that is the refusal switched off by the very state
+    this docstring is about. The list still names every folder a cull could
+    be under, the other name after it on a flat shoot as before, and on a
+    shoot with a raw/ too once one is on disk, so Shoot.cull_roots guards
+    every one of them whichever holds the cull.
+
+    Only when the answer is about this very folder, though: library.paths
+    answers for the shoot AROUND a raw/ or a cull/ it is pointed at, and the
+    survey here walks the folder it was handed. Pointed at one of those,
+    this keeps its own old answer inside that folder."""
     shoot = Path(shoot)
-    if (shoot / "raw").is_dir():
-        return [shoot / "cull"]
-    return [shoot / "cull", shoot / "_cull"]
+    where = library.paths(shoot)
+    names = [shoot / "cull", shoot / "_cull"]
+    if where.shoot != shoot.expanduser():
+        return names[:1] if (shoot / "raw").is_dir() else names
+    first = where.cull
+    rest = [p for p in names if p != first and (not (shoot / "raw").is_dir() or p.is_dir())]
+    return [first, *rest]
 
 
 def cull_dir(shoot: Path) -> Path:
-    """Whichever of cull_dirs() is on disk, and <shoot>/cull when neither is."""
+    """Whichever of cull_dirs() is on disk, and <shoot>/cull when neither is:
+    library.paths' answer, which cull_dirs puts first (when it is about this
+    folder at all)."""
     options = cull_dirs(shoot)
     for p in options:
         if p.is_dir():
