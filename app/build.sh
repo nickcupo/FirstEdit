@@ -495,9 +495,12 @@ done
 # every launch, with nowhere to keep the result (the bundle is signed). They
 # are compiled again here against the copied files, with the build folder cut
 # off their paths, and marked to be trusted without a timestamp check, since a
-# signed bundle cannot change underneath them.
+# signed bundle cannot change underneath them. -f, and no bytecode written by
+# the interpreter itself: starting it imports the encodings modules, which
+# otherwise wrote their .pyc with the full path first, and compileall skips a
+# .pyc whose timestamp matches whatever mode it was asked for.
 find "$R/python" -name __pycache__ -type d -prune -exec rm -rf {} +
-"$R/python/bin/python3" -m compileall -q -j 0 --invalidation-mode unchecked-hash \
+PYTHONDONTWRITEBYTECODE=1 "$R/python/bin/python3" -m compileall -f -q -j 0 --invalidation-mode unchecked-hash \
   -s "$PWD/$R/python" -p "${APP:t}/Contents/Resources/python" "$PWD/$R/python/lib" >/dev/null \
   || echo "  some files did not compile; Python compiles those at import instead"
 # Real files only. A public build copies regular files and skips a symlink,
