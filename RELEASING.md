@@ -6,6 +6,23 @@ is automated, because every step is one that cannot be taken back. A published
 DMG cannot be unpublished, MIT cannot be revoked, and a pushed history is on
 other people's machines before you have finished reading this sentence.
 
+## The build, in short
+
+On the release Mac, from a clean checkout at the release tag:
+
+```sh
+git status --short
+git clone -q . /private/tmp/fe-smoke
+SMOKE_LIBRARY=/private/tmp/fe-smoke IDENTITY="Developer ID Application: Nick Cupo (72BLQYHMTN)" NOTARY_PROFILE=AC_PASSWORD app/build.sh
+```
+
+`git status --short` should print nothing (an untracked file is left out of
+the build, but read what it is). The clone is the smoke test's scratch
+library; if `/private/tmp/fe-smoke` is already there from an earlier build,
+skip that line and reuse it. `AC_PASSWORD` is the notary profile stored in
+this Mac's keychain. The DMG and its notices land in `dist/`. Steps 5 to 7
+below are the same thing in full, with the checks around it.
+
 ## Display branding: FirstEdit
 
 Use **FirstEdit** in the release title and user-facing copy. The shipped bundle
