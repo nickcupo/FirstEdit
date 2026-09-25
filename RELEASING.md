@@ -12,7 +12,7 @@ On the release Mac, from a clean checkout at the release tag:
 
 ```sh
 git status --short
-IDENTITY="Developer ID Application: Nick Cupo (72BLQYHMTN)" NOTARY_PROFILE=AC_PASSWORD app/build.sh
+IDENTITY="Developer ID Application: Nicholas Cupo (72BLQYHMTN)" NOTARY_PROFILE=AC_PASSWORD app/build.sh
 ```
 
 `git status --short` should print nothing (an untracked file is left out of
