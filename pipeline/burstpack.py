@@ -387,6 +387,7 @@ INTRA = ("W", "N", "NW", "NE")
 INTER = ("R", "RW", "RE", "RN", "RS", "RNW", "RNE", "RSW", "RSE")
 DELTA_T = np.array([0, 1, 2, 3, 4, 6, 8, 11, 16, 22, 32, 45, 64, 90, 128, 256], np.int64)
 ROOM_T = np.array([0, 1, 2, 3, 4, 6, 8, 12, 16], np.int64)
+ICTX_T = np.array([0, 16, 64, 256, 1024], np.int64)
 HDR_T = np.array([0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 128], np.int64)
 KINDS = {"mn": (len(HDR_T), 48), "rng": (len(HDR_T), 48), "imax": (5, 16), "imin": (5, 16),
          "d": (len(DELTA_T) * len(ROOM_T), 255)}
@@ -461,16 +462,17 @@ def estimate_motion(cur: np.ndarray, ref: np.ndarray) -> np.ndarray:
     """One even (dy, dx) per tile, by block matching on a half-resolution
     brightness map: the whole frame's shift first, by phase correlation, then
     each tile searched around it. Only the encoder runs this, and only its
-    answer is stored, so floating point here decides nothing about decoding."""
+    answer is stored, so floating point here decides nothing about decoding.
+    The search itself is in integers, so the C core finds the same vectors."""
     def half(a):
-        a = a.astype(np.float32)
+        a = a.astype(np.int32)
         return a[0::2, 0::2] + a[0::2, 1::2] + a[1::2, 0::2] + a[1::2, 1::2]
     c, r = half(cur), half(ref)
     h, w = c.shape
     # The burst's shift, on an eighth-size copy.
     s = 4
-    cs = c[:h // s * s, :w // s * s].reshape(h // s, s, w // s, s).mean((1, 3))
-    rs = r[:h // s * s, :w // s * s].reshape(h // s, s, w // s, s).mean((1, 3))
+    cs = c[:h // s * s, :w // s * s].reshape(h // s, s, w // s, s).mean((1, 3), dtype=np.float64)
+    rs = r[:h // s * s, :w // s * s].reshape(h // s, s, w // s, s).mean((1, 3), dtype=np.float64)
     cs -= cs.mean()
     rs -= rs.mean()
     X = np.fft.rfft2(cs) * np.conj(np.fft.rfft2(rs))
@@ -486,17 +488,23 @@ def estimate_motion(cur: np.ndarray, ref: np.ndarray) -> np.ndarray:
     R = SEARCH // 2
     pad = R + max(abs(gy), abs(gx)) + 2
     rp = np.pad(r, pad, mode="edge")
-    best = np.full((nty, ntx), np.inf)
+    best = np.full((nty, ntx), np.iinfo(np.int64).max, np.int64)
     mv = np.zeros((nty, ntx, 2), np.int64)
     Hp, Wp = nty * t, ntx * t
     cp = np.pad(c, ((0, Hp - h), (0, Wp - w)), mode="edge")
     cands = [(gy + dy, gx + dx) for dy in range(-R, R + 1) for dx in range(-R, R + 1)] + [(0, 0)]
+    lib = core()
+    if lib is not None:
+        ca = np.ascontiguousarray(cands, np.int64)
+        lib.bc_motion(_ptr(np.ascontiguousarray(cp, np.int32)), Hp, Wp, _ptr(np.ascontiguousarray(rp, np.int32)),
+                      h, w, pad, t, _ptr(ca), len(cands), _ptr(mv))
+        return mv * 2
     for dy, dx in cands:
         if abs(dy) > pad - 1 or abs(dx) > pad - 1:
             continue
         sh = rp[pad + dy: pad + dy + h, pad + dx: pad + dx + w]
         sh = np.pad(sh, ((0, Hp - h), (0, Wp - w)), mode="edge")
-        sad = np.abs(cp - sh).reshape(nty, t, ntx, t).sum((1, 3))
+        sad = np.abs(cp.astype(np.int64) - sh).reshape(nty, t, ntx, t).sum((1, 3))
         better = sad < best
         best[better] = sad[better]
         mv[better] = (dy, dx)
@@ -520,44 +528,72 @@ def _features(fr: Frame, P: np.ndarray, r0: int, r1: int, ref) -> dict[str, np.n
     return F
 
 
-def fit_weights(fr: Frame, P: np.ndarray, ridge: float = 1.0) -> None:
-    """Least-squares weights per tile and colour, on the frame's own pixels, for
-    both predictors: with the left neighbour (for a step) and without it (for a
-    block's header, which is decoded before any of its steps). The features are
-    the ones the decoder will have, computed the same way, a band of tiles at a
-    time so a 24-megapixel frame never needs its features all at once."""
+def _fit_sums(fr: Frame, P: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """X'X, X'y and the count for every tile and colour, over the features in
+    fr.feats and then 1, in integers: exact, and so the same from C and numpy."""
     H, W = P.shape
     ref = _ref_padded(fr) if fr.ref is not None else None
     names = fr.feats
     nty, ntx = fr.ntiles()
-    nf = len(names)
-    wfull = np.zeros((nty, ntx, 4, nf + 1), np.int64)
-    wpre = np.zeros((nty, ntx, 4, nf), np.int64)
-    pre_idx = [i for i, k in enumerate(names) if k != "W"] + [nf]
+    D = len(names) + 1
+    xtx = np.zeros((nty, ntx, 4, D, D), np.int64)
+    xty = np.zeros((nty, ntx, 4, D), np.int64)
+    cnt = np.zeros((nty, ntx, 4), np.int64)
+    lib = core()
+    if lib is not None:
+        Rp = np.ascontiguousarray(ref[0], np.int16) if ref else None
+        mv = np.ascontiguousarray(fr.mv, np.int64) if ref else None
+        lib.bc_fit(_ptr(np.ascontiguousarray(P, np.int16)), H, W, TILE, _ptr(Rp), ref[1] if ref else 0, _ptr(mv),
+                   ntx, len(names), _ptr(xtx), _ptr(xty), _ptr(cnt))
+        return xtx, xty, cnt
     for ty in range(nty):
         r0, r1 = ty * TILE, min(H, (ty + 1) * TILE)
         F = _features(fr, P, r0, r1, ref)
-        X = np.stack([F[k].astype(np.float64) for k in names] + [np.ones((r1 - r0, W))], axis=-1)
-        y = P[r0:r1].astype(np.float64)
+        X = np.stack([F[k].astype(np.int64) for k in names] + [np.ones((r1 - r0, W), np.int64)], axis=-1)
+        y = P[r0:r1].astype(np.int64)
         for tx in range(ntx):
             xs = slice(tx * TILE, (tx + 1) * TILE)
             for ph in range(4):
                 a, b = divmod(ph, 2)
-                Xt = X[:, xs][a::2, b::2].reshape(-1, nf + 1)
+                A = X[:, xs][a::2, b::2].reshape(-1, D)
                 yt = y[:, xs][a::2, b::2].reshape(-1)
-                if len(yt) < 4:
-                    continue
-                for idx, dest in ((list(range(nf + 1)), wfull), (pre_idx, wpre)):
-                    A = Xt[:, idx]
-                    G = A.T @ A
-                    G[np.diag_indices_from(G)] += ridge
-                    G[-1, -1] -= ridge            # no pull on the bias
-                    w = np.linalg.lstsq(G, A.T @ yt, rcond=None)[0]
-                    wq = np.clip(np.round(w[:-1] * (1 << Q)), -(1 << 15), (1 << 15) - 1).astype(np.int64)
-                    bias = int(np.clip(np.round((yt - (A[:, :-1] @ wq) / (1 << Q)).mean() * (1 << Q)),
-                                       -(1 << 30), (1 << 30)))
-                    dest[ty, tx, ph] = np.append(wq, bias)
-    fr.wfull, fr.wpre = wfull, wpre
+                xtx[ty, tx, ph] = A.T @ A
+                xty[ty, tx, ph] = A.T @ yt
+                cnt[ty, tx, ph] = len(yt)
+    return xtx, xty, cnt
+
+
+def fit_weights(fr: Frame, P: np.ndarray, ridge: float = 1.0) -> None:
+    """Least-squares weights per tile and colour, on the frame's own pixels, for
+    both predictors: with the left neighbour (for a step) and without it (for a
+    block's header, which is decoded before any of its steps). The features are
+    the ones the decoder will have, computed the same way. The sums are exact
+    integers; one batched solve turns them into weights, which are stored."""
+    names = fr.feats
+    nf = len(names)
+    xtx, xty, cnt = _fit_sums(fr, P)
+    shape = cnt.shape
+    xtx = xtx.reshape(-1, nf + 1, nf + 1).astype(np.float64)
+    xty = xty.reshape(-1, nf + 1).astype(np.float64)
+    cnt = cnt.reshape(-1)
+    ok = cnt >= 4
+    out = []
+    for idx in (list(range(nf + 1)), [i for i, k in enumerate(names) if k != "W"] + [nf]):
+        G = xtx[:, idx][:, :, idx].copy()
+        y = xty[:, idx]
+        d = len(idx)
+        G[:, np.arange(d - 1), np.arange(d - 1)] += ridge    # no pull on the bias
+        G[~ok] = np.eye(d)
+        w = np.linalg.solve(G, y[..., None])[..., 0]
+        wq = np.clip(np.round(w[:, :-1] * (1 << Q)), -(1 << 15), (1 << 15) - 1).astype(np.int64)
+        # The bias that makes the rounded weights right on average: mean(y - X.wq / 2**Q), in Q.
+        sums = xtx[:, idx[:-1], nf]          # each feature summed over the group
+        mean = (xty[:, nf] - (sums * wq).sum(1) / (1 << Q)) / np.maximum(cnt, 1)
+        bias = np.clip(np.round(mean * (1 << Q)), -(1 << 30), 1 << 30).astype(np.int64)
+        wq = np.concatenate([wq, bias[:, None]], axis=1)
+        wq[~ok] = 0
+        out.append(wq.reshape(*shape, d))
+    fr.wfull, fr.wpre = out
 
 
 def run_craw(fr: Frame, coder, f: dict[str, np.ndarray] | None) -> dict[str, np.ndarray]:
@@ -610,7 +646,7 @@ def run_craw(fr: Frame, coder, f: dict[str, np.ndarray] | None) -> dict[str, np.
         rng = _code_int(coder, "rng", hctx, (out["mx"][sl].reshape(n) - mn - (mxh - mnh)) if enc else None) + mxh - mnh
         mx = mn + rng
         sh = _shift(rng)
-        ictx = np.minimum(_bucket(mxh - mnh, np.array([0, 16, 64, 256, 1024])), 4)
+        ictx = np.minimum(_bucket(mxh - mnh, ICTX_T), 4)
         desc = np.argsort(-preb, axis=1, kind="stable")
         asc = np.argsort(preb, axis=1, kind="stable")
         if enc:
@@ -691,6 +727,147 @@ def _pixels_mosaic(f: dict[str, np.ndarray], H: int, W: int) -> np.ndarray:
     return out
 
 
+# ---------------------------------------------------------------- the core
+#
+# burstcore.c is run_craw and the rANS coder written out per pixel: the same
+# bytes, 20 to 50 times sooner. The app carries it built and signed beside this
+# file; a checkout builds it the first time it is wanted, into the support
+# folder, keyed by the source's hash. Without a compiler, or with
+# BURSTPACK_PURE=1, everything here runs in numpy instead, byte for byte the
+# same, only slower. The library is used only if the constants it reports
+# are this file's own.
+
+_CORE: dict = {}
+EVENTS_PER_PAIR = 20        # min and its bits, range and its bits, imax, imin, fourteen steps
+
+
+def _lib_name() -> str:
+    return "libburstcore.dylib" if sys.platform == "darwin" else "libburstcore.so"
+
+
+def _build_core(src: Path) -> Path | None:
+    import shutil
+    import subprocess
+    try:
+        from common import support_dir
+        base = support_dir(create=True)
+    except Exception:
+        base = Path(tempfile.gettempdir())
+    digest = hashlib.sha256(src.read_bytes()).hexdigest()[:16]
+    out = base / "burstcore" / digest / _lib_name()
+    if out.exists():
+        return out
+    cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
+    if not cc:
+        return None
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f".{out.name}.{os.getpid()}.tmp")
+    try:
+        r = subprocess.run([cc, "-O3", "-std=c99", "-shared", "-fPIC", "-o", str(tmp), str(src)],
+                           capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            return None
+        os.replace(tmp, out)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    finally:
+        tmp.unlink(missing_ok=True)
+    return out
+
+
+def _expected_constants() -> list[int]:
+    v = [1, Q, PREC, DIRECT]
+    for t in (HDR_T, DELTA_T, ROOM_T, ICTX_T):
+        v += [len(t)] + [int(x) for x in t]
+    for nctx, nsym in KINDS.values():
+        v += [nctx, nsym]
+    return v
+
+
+def core():
+    """The C core, or None: then numpy does the same work."""
+    if "lib" in _CORE:
+        return _CORE["lib"]
+    _CORE["lib"] = None
+    if os.environ.get("BURSTPACK_PURE") == "1":
+        return None
+    import ctypes
+    here = Path(__file__).resolve().parent
+    cands = [here / _lib_name()]
+    if not cands[0].exists() and (here / "burstcore.c").exists():
+        built = _build_core(here / "burstcore.c")
+        cands = [built] if built else []
+    for c in cands:
+        try:
+            lib = ctypes.CDLL(str(c))
+        except OSError:
+            continue
+        buf = (ctypes.c_int64 * 128)()
+        n = lib.bc_constants(buf, 128)
+        if n <= 0 or list(buf[:n]) != _expected_constants():
+            continue
+        P = ctypes.c_void_p
+        lib.bc_pixels.argtypes = [P, ctypes.c_int, ctypes.c_int, P]
+        lib.bc_craw.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, P, P, P, ctypes.c_int,
+                                P, ctypes.c_int, P, P, ctypes.c_int, P, P, P, P, P, P, P, P, ctypes.c_int64]
+        lib.bc_rans_encode.argtypes = [ctypes.c_int, ctypes.c_int, P, P, P, P, P, P, ctypes.c_int64]
+        lib.bc_rans_encode.restype = ctypes.c_int64
+        lib.bc_fit.argtypes = [P, ctypes.c_int, ctypes.c_int, ctypes.c_int, P, ctypes.c_int, P, ctypes.c_int,
+                               ctypes.c_int, P, P, P]
+        lib.bc_motion.argtypes = [P, ctypes.c_int, ctypes.c_int, P, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                  ctypes.c_int, P, ctypes.c_int, P]
+        _CORE["lib"] = lib
+        break
+    return _CORE["lib"]
+
+
+def _ptr(a: np.ndarray | None):
+    return None if a is None else a.ctypes.data
+
+
+_CORE_ERRORS = {-1: "the stream ends early", -2: "the stream names a symbol its table does not have",
+                -3: "the stream did not end where it should", -4: "out of memory", -5: "a frame it cannot take"}
+
+
+def _core_frame(lib, dec: bool, fr: Frame, strip: np.ndarray, tables=None, states=None, words=None):
+    """bc_craw over one frame. Encoding returns (ctx, val, counts); decoding fills strip."""
+    H, W = fr.H, fr.W
+    B = W // 16
+    P = np.zeros((H, W), np.int16)
+    Rp = m = None
+    if fr.ref is not None:
+        Rp, m = _ref_padded(fr)
+        Rp = np.ascontiguousarray(Rp, np.int16)
+        mv = np.ascontiguousarray(fr.mv, np.int64)
+    else:
+        mv = None
+    nty, ntx = fr.ntiles()
+    wfull = np.ascontiguousarray(fr.wfull, np.int64)
+    wpre = np.ascontiguousarray(fr.wpre, np.int64)
+    nf = len(fr.feats)
+    total = ((H + 1) // 2) * EVENTS_PER_PAIR * 2 * B
+    if not dec:
+        rctx = np.zeros(total, np.int32)
+        rval = np.zeros(total, np.int32)
+        counts = np.zeros(sum(a * b for a, b in KINDS.values()), np.int64)
+        freq = cum = lookup = st = wd = None
+        nw = 0
+    else:
+        rctx = rval = counts = None
+        freq = np.concatenate([tables[k].freq.reshape(-1) for k in KINDS]).astype(np.uint32)
+        cum = np.concatenate([tables[k].cum.reshape(-1) for k in KINDS]).astype(np.uint32)
+        lookup = np.concatenate([tables[k].lookup.reshape(-1) for k in KINDS]).astype(np.uint8)
+        st = np.ascontiguousarray(states, np.uint32)
+        wd = np.ascontiguousarray(words, np.uint16)
+        nw = len(wd)
+    err = lib.bc_craw(1 if dec else 0, H, W, TILE, _ptr(strip), _ptr(P), _ptr(Rp), m or 0, _ptr(mv), ntx,
+                      _ptr(wfull), _ptr(wpre), nf, _ptr(rctx), _ptr(rval), _ptr(counts),
+                      _ptr(freq), _ptr(cum), _ptr(lookup), _ptr(st), _ptr(wd), nw)
+    if err:
+        raise ValueError(f"burstpack: {_CORE_ERRORS.get(err, err)}")
+    return P, rctx, rval, counts
+
+
 # ------------------------------------------------------------ frame codecs
 
 def _blob(*parts: bytes) -> bytes:
@@ -718,18 +895,42 @@ def _unarr(b: bytes, dtype: str) -> np.ndarray:
 
 def encode_craw(strip: bytes, H: int, W: int, ref: np.ndarray | None) -> tuple[bytes, np.ndarray]:
     """The sensor data of one frame, and its pixels for the next frame to refer to."""
-    f = craw_fields(np.frombuffer(strip, np.uint8), H, W)
-    P = _pixels_mosaic(f, H, W)
+    lib = core()
+    raw = np.frombuffer(strip, np.uint8)
+    if lib is not None:
+        P = np.zeros((H, W), np.int16)
+        lib.bc_pixels(_ptr(np.ascontiguousarray(raw)), H, W, _ptr(P))
+        f = None
+    else:
+        f = craw_fields(raw, H, W)
+        P = _pixels_mosaic(f, H, W)
     fr = Frame(H, W)
     if ref is not None and ref.shape == P.shape:
         fr.ref = ref
         fr.mv = estimate_motion(P, ref)
     fit_weights(fr, P)
-    rec = Recorder()
-    run_craw(fr, rec, f)
-    counts = rec.counts(KINDS)
-    tables = {k: Tables.from_counts(c) for k, c in counts.items()}
-    states, words = rans_encode(rec.events, tables, 2 * (W // 16))
+    if lib is not None:
+        buf = np.array(raw[:H * W])
+        _, rctx, rval, flat = _core_frame(lib, False, fr, buf)
+        tables, i = {}, 0
+        for k, (nctx, nsym) in KINDS.items():
+            tables[k] = Tables.from_counts(flat[i:i + nctx * nsym].reshape(nctx, nsym))
+            i += nctx * nsym
+        freq = np.concatenate([tables[k].freq.reshape(-1) for k in KINDS]).astype(np.uint32)
+        cum = np.concatenate([tables[k].cum.reshape(-1) for k in KINDS]).astype(np.uint32)
+        states = np.zeros(2 * (W // 16), np.uint32)
+        words = np.zeros(len(rctx), np.uint16)
+        nw = lib.bc_rans_encode(H, W // 16, _ptr(rctx), _ptr(rval), _ptr(freq), _ptr(cum),
+                                _ptr(states), _ptr(words), len(words))
+        if nw < 0:
+            raise AssertionError(f"burstpack: the coder refused a frame ({nw})")
+        words = words[:nw]
+    else:
+        rec = Recorder()
+        run_craw(fr, rec, f)
+        counts = rec.counts(KINDS)
+        tables = {k: Tables.from_counts(c) for k, c in counts.items()}
+        states, words = rans_encode(rec.events, tables, 2 * (W // 16))
     head = json.dumps({"H": H, "W": W, "ref": fr.ref is not None, "tile": TILE, "q": Q}).encode()
     parts = [head, _arr(fr.wfull, "<i4"), _arr(fr.wpre, "<i4"),
              _arr(fr.mv if fr.mv is not None else np.zeros((0,)), "<i2")]
@@ -754,6 +955,13 @@ def decode_craw(payload: bytes, ref: np.ndarray | None) -> tuple[bytes, np.ndarr
     i = 4 + len(KINDS)
     states = np.frombuffer(parts[i], "<u4")
     words = np.frombuffer(parts[i + 1], "<u2")
+    if len(states) != 2 * (W // 16):
+        raise ValueError("burstpack: the stream's lanes do not match the frame")
+    lib = core()
+    if lib is not None:
+        strip = np.zeros(H * W, np.uint8)
+        P, *_ = _core_frame(lib, True, fr, strip, tables, states, words)
+        return strip.tobytes(), P
     dec = Decoder(states, words, tables)
     f = run_craw(fr, dec, None)
     if not dec.done():
@@ -1080,31 +1288,118 @@ def pack_shoot(shoot: Path, apply: bool, log=print) -> int:
         return 0
     done = failed = 0
     before = after = 0
+    # What a stopped run left: its own temp files, never anything else.
+    if dest.is_dir():
+        for t in dest.glob(".burst-*.fbp.*.tmp"):
+            t.unlink(missing_ok=True)
     log(f"@@ pack 0 {nf}")
-    for bid, files, key in todo:
-        out = dest / f"burst-{bid}.fbp"
 
-        def tick(line: str) -> None:
-            nonlocal done
-            log(line)
-            if line.startswith("  ") and " -> " in line:
-                done += 1
-                log(f"@@ pack {done} {nf}")
-        try:
-            m = pack(files, out, key, log=tick)
-        except Exception as e:      # one burst's failure is said, and the rest go on
+    def tick(line: str) -> None:
+        nonlocal done
+        log(line)
+        if line.startswith("  ") and " -> " in line:
+            done += 1
+            log(f"@@ pack {done} {nf}")
+
+    def ended(bid: str, b: int, a: int, err: str | None) -> None:
+        nonlocal failed, before, after
+        if err is not None:        # one burst's failure is said, and the rest go on
             failed += 1
-            log(f"  burst {bid}: not packed: {e}")
-            continue
-        b, a = sum(f["size"] for f in m["frames"]), out.stat().st_size
+            log(f"  burst {bid}: not packed: {err}")
+            return
         before, after = before + b, after + a
         log(f"  burst {bid}: {human(b)} -> {human(a)} ({a / b:.0%}), every frame unpacked and matched")
+
+    # The biggest bursts first, so the last worker is not left with the longest one.
+    jobs = sorted(((bid, files, key, dest / f"burst-{bid}.fbp") for bid, files, key in todo),
+                  key=lambda j: -sum(p.stat().st_size for p in j[1]))
+    workers = _workers(len(jobs), max(p.stat().st_size for _, f, _ in todo for p in f))
+    log(f"packing on {workers} {'core' if workers == 1 else 'cores'}"
+        f"{'' if core() is not None else ', without the C core'}")
+    if workers == 1:
+        for job in jobs:
+            ended(*_pack_one(job, tick))
+    else:
+        _pack_parallel(jobs, workers, tick, ended)
     if before:
         log(f"packed {human(before)} of RAWs into {human(after)} ({after / before:.0%}), in {dest}")
     if failed:
         log(f"{failed} bursts could not be packed; their RAWs are untouched")
         return 1
     return 0
+
+
+def _workers(nbursts: int, file_bytes: int) -> int:
+    """How many bursts to pack at once: three quarters of the cores, never more
+    than the memory holds. A worker holds a burst's files, its archive and a
+    few frame-sized buffers; a compressed ARW is a byte a pixel, so the file
+    size is the pixel count, and the numpy path holds about twice what C does."""
+    per = (48 if core() is not None else 96) * max(file_bytes, 1)
+    cores = max(1, (os.cpu_count() or 2) * 3 // 4)
+    try:
+        ram = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (ValueError, OSError, AttributeError):
+        ram = 8 << 30
+    return max(1, min(nbursts, cores, int((ram - (3 << 30)) // per)))
+
+
+def _pack_one(job: tuple, log) -> tuple[str, int, int, str | None]:
+    """(burst, bytes in, bytes out, what went wrong) for one burst."""
+    bid, files, key, out = job
+    try:
+        m = pack(files, out, key, log=log)
+    except Exception as e:
+        return bid, 0, 0, str(e)
+    return bid, sum(f["size"] for f in m["frames"]), out.stat().st_size, None
+
+
+_LINES = None
+
+
+def _worker_start(q) -> None:
+    global _LINES
+    _LINES = q
+    # The studio's Stop sends SIGTERM to the whole group; a worker just ends,
+    # and the parent's pool, unwinding, takes the rest down.
+
+
+def _worker_pack(job: tuple) -> tuple[str, int, int, str | None]:
+    return _pack_one(job, _LINES.put)
+
+
+def _pack_parallel(jobs: list[tuple], workers: int, tick, ended) -> None:
+    """Bursts on separate processes. Each burst is one worker's from start to
+    finish, so the frames of a burst are still packed in their order; only
+    whole bursts run side by side. Every line a worker prints comes back here,
+    so the progress bar and the log are the same as a run on one core."""
+    import multiprocessing as mp
+    import queue
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    with ctx.Pool(workers, initializer=_worker_start, initargs=(q,)) as pool:
+        pending = [pool.apply_async(_worker_pack, (job,)) for job in jobs]
+        while pending:
+            try:
+                tick(q.get(timeout=0.25))
+            except queue.Empty:
+                pass
+            still = []
+            for r in pending:
+                if r.ready():
+                    while True:            # its own lines first, then how it ended
+                        try:
+                            tick(q.get_nowait())
+                        except queue.Empty:
+                            break
+                    ended(*r.get())
+                else:
+                    still.append(r)
+            pending = still
+    while True:
+        try:
+            tick(q.get_nowait())
+        except queue.Empty:
+            break
 
 
 def _here() -> Path:
@@ -1152,6 +1447,11 @@ def main(argv: list[str] | None = None) -> int:
             ref = "whole" if f["ref"] is None else "from " + m["frames"][f["ref"]]["name"]
             print(f"  {f['name']:<16} {f['size']:>12,} -> {f['length']:>12,}  {f['length'] / f['size']:6.1%}  {f['codec']} {ref}")
     elif a.cmd == "shoot":
+        # Stop in the app is SIGTERM: unwind, so the pool of workers is ended
+        # and a half-written archive is removed rather than left in packed/.
+        sys.path.insert(0, str(_here()))
+        from common import stop_cleanly_on_sigterm  # noqa: E402
+        stop_cleanly_on_sigterm()
         return pack_shoot(a.shoot, a.apply, log=lambda line: print(line, flush=True))
     elif a.cmd == "bench":
         bursts = bursts_of(a.shoot)[:a.bursts]

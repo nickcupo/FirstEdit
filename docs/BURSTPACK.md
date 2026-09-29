@@ -65,8 +65,31 @@ method can predict, and on these dark bursts the codec is within about 0.1
 bit per pixel of that noise floor. Brighter base-ISO frames should gain more
 from the neighbour; `bench` on a real shoot is the measurement that says.
 
-Speed, pure numpy, one core: about 25 s to pack and 10 s to unpack a 12 MP
-frame; roughly double for 24 MP.
+## Speed
+
+The inner loop, the rANS coder, the weight fit's sums and the motion search
+are in C (`pipeline/burstcore.c`). The format is the numpy code's: the tests
+pack with both and require the same bytes, and either unpacks what the other
+packed. `app/build.sh` builds the library into the app and stops if the
+bundle's Python cannot load it; a checkout builds it on first use into the
+support folder. Without a compiler, or with `BURSTPACK_PURE=1`, the numpy
+code runs instead, identically and about five times slower.
+
+Pack Bursts packs several bursts at once, one burst to a process, on three
+quarters of the cores and no more than the memory holds (about 48 bytes a
+pixel each).
+
+Measured on the five HDR+ bursts above (12 MP), in a 4-core Linux container:
+
+| | numpy | C |
+|---|---|---|
+| pack a frame alone | ~13 s | 1.1 s |
+| pack a frame from its neighbour | ~16 s | 2.8 s |
+| unpack a frame | ~8 s | 1.3 s |
+| the 25 frames, packed and checked, from Pack Bursts | ~10 min (est.) | 117 s on one core, 41 s on three |
+
+A 24 MP frame is about twice the work. An Apple silicon core is faster than
+this container's, and has more of them beside it; that has not been measured.
 
 ## Not done
 

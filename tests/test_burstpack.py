@@ -300,3 +300,68 @@ def test_the_finish_page_reads_the_list_the_command_printed(tmp_path):
     assert argv[-4:] == [str(Path(studio.HERE) / "burstpack.py"), "shoot", str(shoot), "--apply"]
     empty = studio._parse_plan("pack", "every burst of x is already packed, in /x/packed", {})
     assert not empty["ready"] and not empty["label"]
+
+
+# ------------------------------------------------------------- the C core
+
+needs_core = pytest.mark.skipif(bp.core() is None, reason="no C compiler here, so no core to compare with numpy")
+
+
+def _numpy(fn):
+    """fn() with the C core put away, so every step runs in numpy."""
+    lib = bp._CORE.get("lib")
+    bp._CORE["lib"] = None
+    try:
+        return fn()
+    finally:
+        bp._CORE["lib"] = lib
+
+
+@needs_core
+def test_the_c_core_writes_the_same_bytes_as_numpy():
+    """The format is numpy's, and C is only a faster way to write it: the same
+    archive from either, frame alone, frame from its neighbour, blocks that
+    break the rules, and an odd number of rows."""
+    a, b = (bp.craw_bytes(craw_encode(p)) for p in _burst(2, seed=7))
+    blob_c, pc = bp.encode_craw(a, H, W, None)
+    blob_n, pn = _numpy(lambda: bp.encode_craw(a, H, W, None))
+    assert blob_c == blob_n and (pc == pn).all()
+    assert bp.encode_craw(b, H, W, pc)[0] == _numpy(lambda: bp.encode_craw(b, H, W, pn))[0]
+    g = np.random.default_rng(8).integers(0, 256, size=34 * 64, dtype=np.uint8).tobytes()
+    assert bp.encode_craw(g, 34, 64, None)[0] == _numpy(lambda: bp.encode_craw(g, 34, 64, None))[0]
+    odd = bp.craw_bytes(craw_encode(_burst(1)[0][:33]))
+    assert bp.encode_craw(odd, 33, W, None)[0] == _numpy(lambda: bp.encode_craw(odd, 33, W, None))[0]
+
+
+@needs_core
+def test_either_unpacks_what_the_other_packed():
+    a, b = (bp.craw_bytes(craw_encode(p)) for p in _burst(2, seed=9))
+    blob_a, pa = _numpy(lambda: bp.encode_craw(a, H, W, None))
+    blob_b, _ = _numpy(lambda: bp.encode_craw(b, H, W, pa))
+    got_a, qa = bp.decode_craw(blob_a, None)
+    assert got_a == a and bp.decode_craw(blob_b, qa)[0] == b
+    blob_c, pc = bp.encode_craw(b, H, W, None)
+    assert _numpy(lambda: bp.decode_craw(blob_c, None))[0] == b
+
+
+@needs_core
+def test_the_c_core_says_so_when_a_stream_is_damaged():
+    s = bp.craw_bytes(craw_encode(_burst(1, seed=10)[0]))
+    parts = bp._unblob(bp.encode_craw(s, H, W, None)[0])
+    words = bytearray(parts[-1])
+    del words[-8:]                      # cut short
+    with pytest.raises(ValueError):
+        bp.decode_craw(bp._blob(*parts[:-1], bytes(words)), None)
+
+
+def test_bursts_are_packed_side_by_side_to_the_same_bytes(tmp_path, monkeypatch):
+    one, two = _shoot(tmp_path / "one"), _shoot(tmp_path / "two")
+    monkeypatch.setattr(bp, "_workers", lambda n, b: 1)
+    assert bp.pack_shoot(one, apply=True, log=lambda *_: None) == 0
+    monkeypatch.setattr(bp, "_workers", lambda n, b: 2)
+    said: list[str] = []
+    assert bp.pack_shoot(two, apply=True, log=said.append) == 0
+    assert "packing on 2 cores" in said[1]
+    assert "@@ pack 5 5" in said, "every frame a worker packed is counted on the bar"
+    for name in ("burst-0.fbp", "burst-1.fbp"):
+        assert (one / "packed" / name).read_bytes() == (two / "packed" / name).read_bytes()

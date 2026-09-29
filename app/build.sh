@@ -524,6 +524,15 @@ else
     ! -name reel.py ! -name spread.py -exec cp {} "$R/pipeline/" \;
 fi
 cp -R pipeline/templates "$R/pipeline/templates"
+# Burstpack's C core, built for this Mac's architecture and signed with every
+# other Mach-O in step 5. The bundle cannot build it for itself (it is signed,
+# and a Mac need not have a compiler), so it is built here or not at all; an
+# app that cannot load it would pack bursts in numpy, correctly and 20 times
+# slower, so it stops the build instead.
+xcrun clang -O3 -std=c99 -Wall -shared -fPIC -o "$R/pipeline/libburstcore.dylib" pipeline/burstcore.c
+PYTHONDONTWRITEBYTECODE=1 "$R/python/bin/python3" -c 'import sys; sys.path.insert(0, sys.argv[1]); import burstpack; sys.exit(burstpack.core() is None)' "$R/pipeline" \
+  || { echo "  the bundle's python cannot load pipeline/libburstcore.dylib"; exit 1; }
+echo "  burstpack's C core built and loads"
 cp -R build/models "$R/models"
 cp -R build/exiftool "$R/exiftool"
 
