@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.1.7
+
+A shoot's RAWs can now go to iCloud packed, at about half the size, and come
+back byte for byte. Back Up to iCloud on the Finish page asks which form:
+the RAW files as they are, or packed. Packed stores each burst as the frame
+you kept and how the others differ from it, losslessly, in one file
+(`burstpack.py`, `docs/BURSTPACK.md`). Every file is unpacked and checked
+against its RAWs before it is copied, and read back after. On five real
+bursts it came to 55% of the RAWs' size, where xz reached 74%.
+
+The RAWs come back by themselves. Culling again, writing the presets or
+building the PhotoLab folder first brings back into the shoot any RAW that is
+only in iCloud, from its ARW or its packed burst, each checked against its
+checksum, and stops rather than work on part of a shoot.
+
+The storage panel is simpler: Back Up to iCloud and Bring Back from iCloud,
+a More menu with the checks and the cache, and below the rule Free Up Space,
+which asks where (on this Mac, or in iCloud) and removes one copy only where
+another is checked, and Let Go of the RAWs in iCloud. Letting go no longer
+rewrites the archive record from its ARW entries alone.
+
+The codec's inner loop is C (`pipeline/burstcore.c`), built into the app and
+checked to write exactly the bytes the numpy code does; bursts pack on three
+quarters of the cores.
+
 ## v0.1.6
 
 Every frame's starting edit now carries its own color: flatter frames get
