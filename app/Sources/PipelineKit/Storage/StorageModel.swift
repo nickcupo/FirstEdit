@@ -265,6 +265,22 @@ public final class StorageModel {
         } catch { refusals.set(.storage, Strings.API.offline); return false }
     }
 
+    /// Every packed burst unpacked in memory and checked, frame by frame,
+    /// against its checksum and the RAW on this Mac. Reads only, so it has no
+    /// plan in front of it either.
+    public func checkPackedBursts() async -> Bool {
+        guard let client else { return false }
+        do {
+            let ok = try await client.post(Routes.storageCheck,
+                                           StorageCheckBody(name: shoot, packed: true))
+            guard note(ok) else { return false }
+            startFollowing(ok.id)
+            return true
+        } catch let e as StudioError {
+            refusals.set(.storage, e.sentence); return false
+        } catch { refusals.set(.storage, Strings.API.offline); return false }
+    }
+
     public func setRetention(days: Int, asDefault: Bool) async {
         guard let client else { return }
         do {

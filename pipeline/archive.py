@@ -4,11 +4,16 @@ archive.py - a shoot's RAWs, kept in iCloud Drive.
 
     ./pl archive report                     what each shoot would cost, and what is already up
     ./pl archive status <shoot>             frame by frame: local, in iCloud, evicted, missing
-    ./pl archive push <shoot> [--apply]     copy the originals up and verify them, the night of the
-                                            shoot or any time after. Deletes nothing.
+    ./pl archive push <shoot> [--as raw|packed] [--apply]
+                                            copy the originals up and verify them, the night of the
+                                            shoot or any time after, as ARWs or packed bursts
+                                            (burstpack.py, about half the size). Deletes nothing.
     ./pl archive drop <shoot> [--apply]     remove local originals that are provably in iCloud, once
                                             the shoot is finished
     ./pl archive pull <shoot> [--apply]     bring them back down
+    ./pl archive trim <shoot> [--only raw|packed|both] [--apply]
+                                            remove copies from iCloud whose RAWs are on this Mac,
+                                            the same bytes. No frame is left without a copy.
     ./pl archive expire <shoot> [--apply]   let go of archived RAWs he no longer needs. The only
                                             command here that can destroy a photograph outright.
 
@@ -408,33 +413,96 @@ def dest_for(shoot: Path, name: str) -> Path:
     return ARCHIVE / Path(shoot).name / name
 
 
+# ------------------------------------------------------------ packed bursts
+#
+# A burst packed on the Finish page (burstpack.py) is a second form a frame's
+# copy in iCloud can take: packed/<burst>.fbp in the shoot's archive folder,
+# holding every frame of the burst losslessly, at about half the size. push
+# sends it instead of the burst's ARWs; drop and pull accept it as the copy.
+#
+# The record is archive.json's "packed": for each file its bytes and SHA-256,
+# and for each frame in it that frame's bytes and SHA-256 as it was packed.
+# Nothing here trusts a packed file on its record alone. push unpacks it in
+# memory, and checks every frame against the RAW on this disk, before copying
+# it; drop unpacks the copy IN iCloud and removes a RAW only when what comes
+# out is, byte for byte, the RAW it is about to remove; pull checks what it
+# writes against the record before the name is given to it.
+
+PACKED = "packed"
+
+
+def packed_dest(shoot: Path, file: str) -> Path:
+    return ARCHIVE / Path(shoot).name / PACKED / file
+
+
+def packed_frames(man: dict) -> dict[str, tuple[str, dict]]:
+    """Every frame recorded in a packed file up there: name -> (file, frame record)."""
+    out: dict[str, tuple[str, dict]] = {}
+    for file, rec in (man.get("packed") or {}).items():
+        for name, fr in (rec.get("frames") or {}).items():
+            out.setdefault(name, (file, fr))
+    return out
+
+
+def _burstpack():
+    sys.path.insert(0, str(HERE))
+    import burstpack
+    return burstpack
+
+
+def unpacked_hashes(p: Path) -> dict[str, str]:
+    """name -> SHA-256 of every frame this packed file gives back, unpacked in
+    memory. burstpack checks each frame against the checksum the file carries
+    and refuses the whole file if any differs; ValueError, or OSError, if it
+    cannot be read or unpacked at all."""
+    bp = _burstpack()
+    return {name: hashlib.sha256(data).hexdigest() for name, data in bp._unpack_bytes(p.read_bytes()).items()}
+
+
+def local_packed(shoot: Path) -> list[Path]:
+    d = Path(shoot) / PACKED
+    return sorted(q for q in d.glob("*.fbp") if not q.name.startswith(".")) if d.is_dir() else []
+
+
 # ------------------------------------------------------------ status
 
 def status(shoot: Path) -> dict:
     """What is true right now, per frame, without trusting the manifest."""
     shoot = Path(shoot).expanduser().resolve()
     raw, _ = parts(shoot)
-    man = load_manifest(shoot)["frames"]
+    whole = load_manifest(shoot)
+    man = whole["frames"]
+    packed = packed_frames(whole)
+
+    def up_of(name: str) -> tuple[bool, bool]:
+        # The ARW copy when there is one; else the packed file holding the frame.
+        d = dest_for(shoot, name)
+        if d.exists() or name not in packed:
+            return d.exists(), local(d)
+        q = packed_dest(shoot, packed[name][0])
+        return q.exists(), local(q)
+
     rows = []
     for p in originals(raw):
-        d = dest_for(shoot, p.name)
+        up, up_local = up_of(p.name)
         rows.append({
             "name": p.name,
             "bytes": p.stat().st_size,
             "here": local(p),
             "here_evicted": is_dataless(p),
-            "up": d.exists(),
-            "up_local": local(d),
-            "recorded": p.name in man,
+            "up": up,
+            "up_local": up_local,
+            "recorded": p.name in man or p.name in packed,
         })
     # Frames that are in the manifest and no longer beside the RAWs: already dropped.
     here = {r["name"] for r in rows}
-    for name, rec in man.items():
+    for name, rec in [*man.items(), *((n, fr) for n, (_f, fr) in packed.items() if n not in man)]:
         if name not in here:
-            d = dest_for(shoot, name)
+            up, up_local = up_of(name)
             rows.append({"name": name, "bytes": rec.get("bytes", 0), "here": False,
-                         "here_evicted": False, "up": d.exists(), "up_local": local(d),
+                         "here_evicted": False, "up": up, "up_local": up_local,
                          "recorded": True, "dropped": True})
+            here.add(name)
     return {"shoot": shoot, "rows": rows, "finished": finished(shoot)}
 
 
@@ -454,14 +522,18 @@ def summarise(st: dict) -> dict:
 
 # ------------------------------------------------------------ push
 
-def push(shoot: Path, apply: bool, force: bool = False) -> int:
+def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> int:
     """Copy the originals up and read each one back. Removes nothing, here or
     there, and so asks nothing of the shoot: it used to refuse one not marked
     finished, which put the one backup he wants the same night - before the
     card is formatted for the next shoot - days away, behind his editing.
     Removing the local originals is what waits for Finish (drop, below).
     `force` is what that refusal was passed to get past; it is still taken,
-    so a line typed from habit is not an error, and means nothing now."""
+    so a line typed from habit is not an error, and means nothing now.
+
+    `form` is what goes up: "raw", the ARWs as they are, or "packed", each
+    burst packed first (burstpack.py) and sent as one file of about half the
+    size. A frame already up in either form is not sent again."""
     shoot = Path(shoot).expanduser().resolve()
     bad = icloud_ready()
     if bad:
@@ -476,7 +548,7 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
     evicted = [p for p in frames if is_dataless(p)]
     if evicted:
         print(f"  {len(evicted)} of this shoot's own RAWs are already evicted to iCloud and would")
-        print("  have to come back down before they could be hashed. Bring the RAWs Back first."
+        print("  have to come back down before they could be hashed. Bring Back from iCloud first."
               if for_the_app() else
               f"  have to come back down before they could be hashed. Run: ./pl archive pull {shoot.name} --apply")
         return 1
@@ -497,11 +569,19 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
         return 1
 
     man = load_manifest(shoot)
+    man.setdefault("packed", {})
+    # A frame is up when its ARW is, or a packed burst holding it is: either
+    # way it is not copied again, whichever form he asks for this time.
+    up_already: set[str] = set()
+    for file, rec in man["packed"].items():
+        q = packed_dest(shoot, file)
+        if q.exists() and q.stat().st_size == rec.get("bytes"):
+            up_already |= set(rec.get("frames") or {})
     todo, already = [], 0
     for p in frames:
         rec = man["frames"].get(p.name)
         d = dest_for(shoot, p.name)
-        if rec and d.exists() and d.stat().st_size == rec.get("bytes"):
+        if (rec and d.exists() and d.stat().st_size == rec.get("bytes")) or p.name in up_already:
             already += 1
             continue
         todo.append(p)
@@ -509,12 +589,37 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
     total = sum(p.stat().st_size for p in todo)
     print(f"  {shoot.name}: {len(frames)} originals, {already} already up")
     print(f"  would copy {len(todo)} frames, {human(total)}, to {dest_for(shoot, '').parent}")
+    if todo and form == "packed":
+        print("  packed first, each burst into one file of about half its size (burstpack), and each")
+        print("  file unpacked and checked against its RAWs before it is copied")
     if not todo:
         print("  nothing to do.")
         return 0
     if not apply:
         print("\n  nothing was copied. Add --apply to copy and verify.")
         return 0
+
+    # Packed: the bursts holding what is to go are packed now (a burst packed
+    # already is used as it is), and those files go up in place of the ARWs.
+    # Which frames a file holds is read off the file; that it holds exactly
+    # the RAWs on this disk is proved before it is copied, below, and a file
+    # that fails the proof is passed over for its ARWs.
+    bp_files: list[tuple[Path, list[str]]] = []
+    if form == "packed":
+        need = {p.name for p in todo}
+        _burstpack().pack_shoot(shoot, True, log=lambda line: print(line, flush=True), only=need)
+        covered: set[str] = set()
+        for q in local_packed(shoot):
+            try:
+                inside = [f["name"] for f in _burstpack().read_manifest(q.read_bytes())[0]["frames"]]
+            except (OSError, ValueError, KeyError):
+                print(f"    {q.name}: not a packed burst this can read; its frames go up as RAWs")
+                continue
+            if need & set(inside) and not covered & set(inside):
+                bp_files.append((q, inside))
+                covered |= set(inside)
+        todo = [p for p in todo if p.name not in covered]
+    packed_frames_n = sum(len(inside) for _q, inside in bp_files)
 
     dest_dir = ARCHIVE / shoot.name
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -527,11 +632,55 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
     # and the next push copied all 2.3 GB up again.
     manifest_path(shoot).parent.mkdir(parents=True, exist_ok=True)
     ok = failed = 0
+    steps = len(todo) + packed_frames_n
+    step = 0
+    by_name = {p.name: p for p in frames}
+    for q, inside in bp_files:
+        progress("push", step, steps)
+        d = packed_dest(shoot, q.name)
+        tmp = d.parent / f".{q.name}.part"
+        try:
+            # The proof: what the file gives back is, frame by frame, the RAW
+            # on this disk. A frame whose RAW is not here is taken on the
+            # file's own checksum, which burstpack has already matched.
+            got = unpacked_hashes(q)
+            wrong = [n for n in inside if n not in got
+                     or (n in by_name and local(by_name[n]) and sha256(by_name[n]) != got[n])]
+            if wrong:
+                print(f"    {q.name}: does not unpack to the RAWs here ({wrong[0]}); its frames go up as RAWs")
+                todo += [by_name[n] for n in inside if n in by_name and n not in {p.name for p in todo}]
+                continue
+            want = sha256(q)
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(q, tmp)
+            if sha256(tmp) != want:
+                tmp.unlink(missing_ok=True)
+                print(f"    {q.name}: copied wrong, left alone")
+                failed += len(inside)
+                continue
+            os.replace(tmp, d)
+            man["packed"][q.name] = {
+                "bytes": q.stat().st_size, "sha256": want,
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "frames": {n: {"bytes": (by_name[n].stat().st_size if n in by_name else 0), "sha256": got[n]}
+                           for n in inside}}
+            ok += len(inside)
+        except (OSError, ValueError) as e:
+            tmp.unlink(missing_ok=True)
+            print(f"    {q.name}: {e}")
+            failed += len(inside)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            write_json_atomic(manifest_path(shoot), man)
+            raise
+        step += len(inside)
+        print(f"    {step}/{steps} copied and verified")
+        write_json_atomic(manifest_path(shoot), man)
     for i, p in enumerate(todo, 1):
         # At the head of the loop, not the foot: a frame that copies wrong
         # takes a `continue`, and a bar that stops moving on the runs worth
         # watching is worse than no bar.
-        progress("push", i - 1, len(todo))
+        progress("push", step + i - 1, step + len(todo))
         d = dest_dir / p.name
         tmp = dest_dir / f".{p.name}.part"
         try:
@@ -565,7 +714,7 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
         if i % 50 == 0 or i == len(todo):
             print(f"    {i}/{len(todo)} copied and verified")
             write_json_atomic(manifest_path(shoot), man)
-    progress("push", len(todo), len(todo))
+    progress("push", step + len(todo), step + len(todo))
     write_json_atomic(manifest_path(shoot), man)
     if for_the_app():
         # One line, and the last: the panel says it under "Finished copying
@@ -573,9 +722,9 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
         # whole home path.
         said = f"{ok} copied and verified, {failed} failed."
         if ok:
-            said += " iCloud still has to upload them, and Remove the Local RAWs takes none until it has."
+            said += " iCloud still has to upload them, and Remove from This Mac takes none until it has."
         if failed:
-            said += f" Copy the RAWs to iCloud again copies the {failed} that failed."
+            said += f" Back Up to iCloud again copies the {failed} that failed."
         print(f"\n  {said}")
         return 0 if not failed else 1
     print(f"\n  {ok} copied and verified, {failed} failed.")
@@ -631,8 +780,10 @@ def drop(shoot: Path, apply: bool) -> int:
         print(f"  {shoot.name} is not finished yet, so its RAWs are still going to be read. Nothing was removed.")
         print("  Press Finish This Shoot on its Finish step first.")
         return 1
-    man = load_manifest(shoot)["frames"]
-    if not man:
+    whole = load_manifest(shoot)
+    man = whole["frames"]
+    packed = packed_frames(whole)
+    if not man and not packed:
         print(f"  {shoot.name} has no archive manifest: nothing was ever pushed.")
         return 1
 
@@ -640,28 +791,81 @@ def drop(shoot: Path, apply: bool) -> int:
     names = inode_names(shoot)
     safe, refused = [], []
     unmanaged = 0
-    # The bar counts this loop rather than the unlinking below it. Dropping
-    # the action shoot reads 26.9 GB back out of iCloud to re-hash it and
-    # then makes about 1,157 unlink() calls: all of the waiting is here.
-    for i, p in enumerate(frames):
-        progress("drop", i, len(frames))
+    # What each packed copy in iCloud unpacks to, worked out once per file:
+    # file -> (name -> SHA-256), or the reason it cannot be relied on.
+    unpacked: dict[str, dict[str, str] | str] = {}
+
+    def by_arw(p: Path) -> tuple[Path | None, dict | None, str]:
+        """(the copy, its record, why not): the ARW in iCloud."""
         rec = man.get(p.name)
         d = dest_for(shoot, p.name)
         if not rec:
-            refused.append((p, "never pushed"))
-            continue
+            return None, None, "never pushed"
         if not d.exists():
-            refused.append((p, "not in iCloud"))
-            continue
+            return None, None, "not in iCloud"
         # The copy has to be HERE to be hashed. An evicted archive copy cannot
         # be verified without downloading it, and dropping the local original
         # on the strength of a file we have not read is the one thing this must
         # never do.
         if not local(d):
-            refused.append((p, "the iCloud copy is evicted; it must come down to be checked"))
-            continue
+            return None, None, "the iCloud copy is evicted; it must come down to be checked"
         if d.stat().st_size != rec.get("bytes"):
-            refused.append((p, "the iCloud copy is a different size"))
+            return None, None, "the iCloud copy is a different size"
+        why = _unvouched(d)
+        if why:
+            return None, None, why
+        if sha256(d) != rec.get("sha256"):
+            return None, None, "the iCloud copy does not match what was pushed"
+        return d, rec, ""
+
+    def by_packed(p: Path) -> tuple[Path | None, dict | None, str]:
+        """(the copy, the frame's record, why not): the packed burst in iCloud,
+        unpacked, giving back this frame."""
+        if p.name not in packed:
+            return None, None, ""
+        file, fr = packed[p.name]
+        arec = whole["packed"][file]
+        q = packed_dest(shoot, file)
+        if not q.exists():
+            return None, None, "its packed burst is not in iCloud"
+        if not local(q):
+            return None, None, "its packed burst in iCloud is evicted; it must come down to be checked"
+        if q.stat().st_size != arec.get("bytes"):
+            return None, None, "its packed burst in iCloud is a different size"
+        why = _unvouched(q)
+        if why:
+            return None, None, why
+        if file not in unpacked:
+            if sha256(q) != arec.get("sha256"):
+                unpacked[file] = "its packed burst in iCloud does not match what was pushed"
+            else:
+                try:
+                    unpacked[file] = unpacked_hashes(q)
+                except (OSError, ValueError) as e:
+                    unpacked[file] = f"its packed burst in iCloud does not unpack ({e})"
+        got = unpacked[file]
+        if isinstance(got, str):
+            return None, None, got
+        if got.get(p.name) != fr.get("sha256"):
+            return None, None, "its packed burst in iCloud does not give this frame back as it was packed"
+        return q, fr, ""
+
+    # The bar counts this loop rather than the unlinking below it. Dropping
+    # the action shoot reads 26.9 GB back out of iCloud to re-hash it and
+    # then makes about 1,157 unlink() calls: all of the waiting is here.
+    for i, p in enumerate(frames):
+        progress("drop", i, len(frames))
+        # Either copy will do, the ARW first. Each has been read back out of
+        # iCloud and matched to its record before it is relied on at all.
+        d, rec, why = by_arw(p)
+        if d is None:
+            d2, rec2, why2 = by_packed(p)
+            if d2 is not None:
+                d, rec, why = d2, rec2, ""
+            elif why2 and why in ("never pushed", "not in iCloud"):
+                why = why2
+        if d is None:
+            refused.append((p, why))
             continue
         # And the file about to be removed has to be the one that was
         # archived. Only the iCloud copy was checked, so a RAW that had taken
@@ -685,13 +889,6 @@ def drop(shoot: Path, apply: bool) -> int:
             refused.append((p, f"it also has a name of yours, {theirs[0].relative_to(shoot)}, which drop "
                                "does not remove, so removing the others would free nothing"))
             continue
-        why = _unvouched(d)
-        if why:
-            refused.append((p, why))
-            continue
-        if sha256(d) != rec.get("sha256"):
-            refused.append((p, "the iCloud copy does not match what was pushed"))
-            continue
         if sha256(p) != rec.get("sha256"):
             refused.append((p, "the file here is not the one that was archived"))
             continue
@@ -701,12 +898,26 @@ def drop(shoot: Path, apply: bool) -> int:
                      st.st_nlink > len(every)))
     progress("drop", len(frames), len(frames))
 
+    # The shoot's own packed bursts, where the same file is up there: the one
+    # in iCloud checked as a packed copy is checked above (there, vouched for,
+    # its record's bytes) and this one the same bytes as it. Packing a shoot
+    # and copying it up would otherwise leave half the RAWs' size behind.
+    safe_packed = []
+    for q in local_packed(shoot):
+        arec = (whole.get("packed") or {}).get(q.name)
+        up = packed_dest(shoot, q.name)
+        if not arec or not up.exists() or not local(up) or up.stat().st_size != arec.get("bytes") \
+                or _unvouched(up) or not local(q) or q.stat().st_size != arec.get("bytes"):
+            continue
+        if sha256(up) == arec.get("sha256") and sha256(q) == arec.get("sha256"):
+            safe_packed.append((q, up, _sig(q), _sig(up)))
+
     print(f"  {shoot.name}: {len(safe)} frames verified in iCloud, {len(refused)} refused")
     for p, why in refused[:8]:
         print(f"    kept  {p.name}: {why}")
     if len(refused) > 8:
         print(f"    ... and {len(refused) - 8} more")
-    if not safe:
+    if not safe and not safe_packed:
         print("\n  nothing is safe to remove.")
         return 1
 
@@ -718,7 +929,10 @@ def drop(shoot: Path, apply: bool) -> int:
     freed = sum(p.stat().st_size for p, _d, _ps, _ds, _n, elsewhere in safe if not elsewhere)
     held = [p for p, _d, _ps, _ds, _n, elsewhere in safe if elsewhere]
     extra = sum(len(n) for *_x, n, _e in safe) - len(safe)
-    print(f"\n  would free {human(freed)} by removing {len(safe)} originals")
+    packed_freed = sum(q.stat().st_size for q, *_x in safe_packed)
+    print(f"\n  would free {human(freed + packed_freed)} by removing {len(safe)} originals")
+    if safe_packed:
+        print(f"  and {len(safe_packed)} packed bursts on this Mac ({human(packed_freed)}) whose copy in iCloud is the same file")
     if extra:
         print(f"  and {extra} further hard links to them inside the shoot (edit/, cull/picks/,")
         print("  reels/), without which not one byte would actually come back")
@@ -760,13 +974,31 @@ def drop(shoot: Path, apply: bool) -> int:
             continue
         gone += 1
         back += 0 if elsewhere else size
+    packed_gone = 0
+    for q, up, qsig, usig in safe_packed:
+        # The same look again as for a RAW, just before it goes.
+        if _sig(q) != qsig or _sig(up) != usig or not local(up) or _unvouched(up):
+            changed.append(q)
+            print(f"    kept  {q.name}: it changed after it was checked; run drop again")
+            continue
+        size = q.stat().st_size
+        try:
+            q.unlink()
+        except OSError as e:
+            print(f"    {q.name}: {e}")
+            continue
+        packed_gone += 1
+        back += size
     if for_the_app():
         said = f"Removed {gone} originals and their links; {human(back)} back."
+        if packed_gone:
+            said = (f"Removed {gone} originals and their links, and {packed_gone} packed bursts; "
+                    f"{human(back)} back.")
         if partial:
             said += f" {len(partial)} could not be removed completely and are still on this disk."
         if changed:
             said += f" {len(changed)} changed after they were checked and were left alone."
-        print(f"\n  {said} Bring the RAWs Back brings them down again.")
+        print(f"\n  {said} Bring Back from iCloud brings them down again.")
         return 1 if partial else 0
     print(f"\n  removed {gone} originals and their links; {human(back)} back.")
     if partial:
@@ -783,8 +1015,10 @@ def drop(shoot: Path, apply: bool) -> int:
 def pull(shoot: Path, apply: bool) -> int:
     shoot = Path(shoot).expanduser().resolve()
     raw, _ = parts(shoot)
-    man = load_manifest(shoot)["frames"]
-    if not man:
+    whole = load_manifest(shoot)
+    man = whole["frames"]
+    packed = packed_frames(whole)
+    if not man and not packed:
         print(f"  {shoot.name} has no archive manifest.")
         return 1
     # Wanted is "no bytes here", not "no name here". A name with nothing
@@ -792,8 +1026,15 @@ def pull(shoot: Path, apply: bool) -> int:
     # exists(), so pull skipped exactly the frames the panel was offering to
     # bring back. Restoring over such a name is safe: the copy lands as a
     # .part and is renamed over it only once it hashes right.
-    want = [(n, r) for n, r in sorted(man.items()) if not local(raw / n)]
-    evicted = [n for n, _ in want if is_dataless(dest_for(shoot, n))]
+    #
+    # A frame whose only copy is in a packed burst is unpacked from it: from
+    # the shoot's own packed/ when that file is the one recorded, which needs
+    # no download, else from the copy in iCloud.
+    both = {**{n: fr for n, (_f, fr) in packed.items()}, **man}
+    want = [(n, r) for n, r in sorted(both.items()) if not local(raw / n)]
+    arw = {n for n in man if dest_for(shoot, n).exists()}
+    evicted = [n for n, _ in want if (is_dataless(dest_for(shoot, n)) if n in arw
+                                      else n in packed and is_dataless(packed_dest(shoot, packed[n][0])))]
     total = sum(r.get("bytes", 0) for _, r in want)
     print(f"  {shoot.name}: {len(want)} frames to bring back, {human(total)}")
     if evicted:
@@ -807,10 +1048,66 @@ def pull(shoot: Path, apply: bool) -> int:
     raw.mkdir(parents=True, exist_ok=True)
     ok = bad = 0
     gave_up, waited_out = "", 0
+    opened: dict[str, dict[str, bytes] | str] = {}
+
+    def from_packed(name: str) -> bytes | str:
+        """The frame's bytes out of its packed burst, or why they could not be had."""
+        file, _fr = packed[name]
+        if file not in opened:
+            arec = whole["packed"][file]
+            here_q, up_q = shoot / PACKED / file, packed_dest(shoot, file)
+            src = here_q if (local(here_q) and here_q.stat().st_size == arec.get("bytes")
+                             and sha256(here_q) == arec.get("sha256")) else up_q
+            if src is up_q:
+                if not up_q.exists():
+                    opened[file] = "its packed burst is not in iCloud"
+                elif not local(up_q) and not materialise(up_q):
+                    opened[file] = "iCloud did not hand its packed burst over"
+            if file not in opened:
+                try:
+                    wanted = {n for n, _ in want if n in packed and packed[n][0] == file}
+                    opened[file] = _burstpack()._unpack_bytes(src.read_bytes(), wanted)
+                except (OSError, ValueError) as e:
+                    opened[file] = f"its packed burst does not unpack ({e})"
+        got = opened[file]
+        if isinstance(got, str):
+            return got
+        # Taken, not read: a shoot's worth of unpacked frames is never held at once.
+        return got.pop(name, None) or "its packed burst does not hold it"
+
     for i, (name, rec) in enumerate(want, 1):
         progress("pull", i - 1, len(want))
         d = dest_for(shoot, name)
         here = raw / name
+        if name not in arw and name in packed:
+            data = from_packed(name)
+            if isinstance(data, str):
+                print(f"    {name}: {data}")
+                bad += 1
+                continue
+            if is_dataless(here) and here.stat().st_size != len(data):
+                print(f"    {name}: a different file of this name is here, evicted; left alone")
+                bad += 1
+                continue
+            tmp = raw / f".{name}.part"
+            try:
+                tmp.write_bytes(data)
+                if sha256(tmp) != rec.get("sha256"):
+                    tmp.unlink(missing_ok=True)
+                    print(f"    {name}: came back wrong, not kept")
+                    bad += 1
+                    continue
+                os.replace(tmp, here)
+                ok += 1
+            except OSError as e:
+                tmp.unlink(missing_ok=True)
+                print(f"    {name}: {e}")
+                bad += 1
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
+            continue
+        rec = man.get(name, rec)
         if not d.exists():
             print(f"    {name}: not in iCloud")
             bad += 1
@@ -859,7 +1156,7 @@ def pull(shoot: Path, apply: bool) -> int:
         said = f"{ok} back, {bad} failed."
         if waited_out:
             said += (f" {waited_out} more are evicted in iCloud and were not asked for after {gave_up};"
-                     " Bring the RAWs Back again asks for them once iCloud can hand them over.")
+                     " Bring Back from iCloud again asks for them once iCloud can hand them over.")
         print(f"\n  {said}")
         return 0 if not bad else 1
     if waited_out:
@@ -1072,7 +1369,13 @@ def expire(shoot: Path, apply: bool, after: int | None, include_keepers: bool,
         except OSError as e:
             print(f"    {name}: {e}")
     progress("expire", len(doomed), len(doomed))
-    write_json_atomic(manifest_path(shoot), {"shoot": shoot.name, "frames": man})
+    # The whole record with only its frames replaced: it carries more than the
+    # ARWs now ("packed"), and a record rebuilt from the frames alone would
+    # forget every packed burst up there.
+    whole = load_manifest(shoot)
+    whole["frames"] = man
+    whole.setdefault("shoot", shoot.name)
+    write_json_atomic(manifest_path(shoot), whole)
     if for_the_app():
         print(f"\n  Removed {gone} from iCloud, {human(back)} of your iCloud quota back."
               + (f" {kept} left alone because they changed after they were checked." if kept else ""))
@@ -1080,6 +1383,128 @@ def expire(shoot: Path, apply: bool, after: int | None, include_keepers: bool,
     print(f"\n  removed {gone} from iCloud, {human(back)} of your iCloud quota back.")
     if kept:
         print(f"  {kept} left alone because they changed after they were checked")
+    return 0
+
+
+def restore_for_work(shoot: Path) -> int:
+    """Before a step that reads the RAWs - the cull, the presets, the
+    PhotoLab folder - every frame recorded as archived whose RAW is not on
+    this Mac is put back into the shoot, from its copy in iCloud or its
+    packed burst, checked as Bring Back from iCloud checks it. So a shoot
+    whose RAWs were moved off this Mac is culled and edited again as though
+    they had never left, with no step of his own first.
+
+    0 when every RAW is here, or has come back; else the step stops, because
+    a cull of part of a shoot would write its verdicts over the frames it
+    could not see."""
+    shoot = library.paths(Path(shoot).expanduser().resolve()).shoot
+    raw, _ = parts(shoot)
+    whole = load_manifest(shoot)
+    missing = sorted(n for n in {*(whole.get("frames") or {}), *packed_frames(whole)} if not local(raw / n))
+    if not missing:
+        return 0
+    print(f"  {len(missing)} RAWs of {shoot.name} are not on this Mac; bringing them back first, each checked",
+          flush=True)
+    rc = pull(shoot, apply=True)
+    left = [n for n in missing if not local(raw / n)]
+    if left:
+        print(f"  {len(left)} RAWs could not be brought back ({left[0]} first), so nothing else was done."
+              " Its copy in iCloud has to be reachable; try again when it is.", flush=True)
+        return 1
+    return rc
+
+
+def trim(shoot: Path, apply: bool, form: str = "both") -> int:
+    """Remove copies from iCloud that this Mac also holds, and nothing else.
+
+    `form` is which: "raw", the ARW copies, "packed", the packed bursts, or
+    "both". An ARW copy goes only when the RAW here is the same bytes; a packed
+    burst only when every frame it holds is here as its RAW, the same bytes.
+    Either way no frame is left with fewer than one copy, and the one it keeps
+    is the RAW on this Mac, checked again just before the copy up there goes.
+
+    What this is not is expire, which lets archived copies go on a schedule
+    and can leave a frame with none. Nothing here waits for Finish or for the
+    retention lock, because nothing here can lose a photograph."""
+    shoot = Path(shoot).expanduser().resolve()
+    bad = icloud_ready()
+    if bad:
+        print(f"  {bad}")
+        return 1
+    raw, _ = parts(shoot)
+    whole = load_manifest(shoot)
+    man = whole.get("frames") or {}
+    packs = whole.get("packed") or {}
+    goes: list[tuple[str, str, Path, int, dict[Path, tuple | None]]] = []
+    kept: list[tuple[str, str]] = []
+    if form in ("raw", "both"):
+        for name, rec in sorted(man.items()):
+            d = dest_for(shoot, name)
+            if not d.exists():
+                continue
+            p = raw / name
+            if not p.exists():
+                kept.append((name, "this Mac has no copy of it"))
+            elif not local(p):
+                kept.append((name, "its RAW here has no bytes on this disk"))
+            elif not _same_bytes(p, rec):
+                kept.append((name, "the RAW here is not the one in iCloud"))
+            else:
+                goes.append(("raw", name, d, rec.get("bytes", 0), {p: _sig(p)}))
+    if form in ("packed", "both"):
+        for file, arec in sorted(packs.items()):
+            q = packed_dest(shoot, file)
+            if not q.exists():
+                continue
+            frames = arec.get("frames") or {}
+            missing = [n for n, fr in frames.items() if not (local(raw / n) and _same_bytes(raw / n, fr))]
+            if missing or not frames:
+                kept.append((file, f"{missing[0] if missing else 'it'} is not on this Mac as the RAW that was packed"
+                                   + (f", nor are {len(missing) - 1} more of its frames" if len(missing) > 1 else "")))
+                continue
+            goes.append(("packed", file, q, arec.get("bytes", 0), {raw / n: _sig(raw / n) for n in frames}))
+    n_raw = sum(1 for g in goes if g[0] == "raw")
+    n_packed = len(goes) - n_raw
+    freed = sum(g[3] for g in goes)
+    print(f"  {shoot.name}: {n_raw} RAW copies and {n_packed} packed bursts in iCloud are also on this Mac")
+    for key, why in kept[:8]:
+        print(f"    - {key}: {why}")
+    if len(kept) > 8:
+        print(f"    - ... and {len(kept) - 8} more stay for the same kinds of reason")
+    if not goes:
+        print("\n  nothing to remove.")
+        return 0
+    print(f"\n  would remove {len(goes)} files from iCloud, {human(freed)}; every frame in them keeps its RAW on this Mac")
+    if not apply:
+        progress("trim", 0, len(goes))
+        print("  nothing was removed. Add --apply.")
+        return 0
+    gone = kept_n = back = 0
+    for i, (kind, key, d, size, sigs) in enumerate(goes):
+        progress("trim", i, len(goes))
+        # The copy up there goes only while the RAWs here are still the files
+        # that were hashed above.
+        if any(_sig(p) != sig or not local(p) for p, sig in sigs.items()):
+            print(f"    kept  {key}: a RAW here changed after it was checked")
+            kept_n += 1
+            continue
+        try:
+            d.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            print(f"    {key}: {e}")
+            continue
+        (man if kind == "raw" else packs).pop(key, None)
+        gone += 1
+        back += size
+    progress("trim", len(goes), len(goes))
+    whole["frames"], whole["packed"] = man, packs
+    write_json_atomic(manifest_path(shoot), whole)
+    said = f"Removed {gone} from iCloud, {human(back)} of your iCloud quota back. Every frame is still on this Mac."
+    if kept_n:
+        said += f" {kept_n} left alone because a RAW changed after it was checked."
+    print(f"\n  {said}")
     return 0
 
 
@@ -1121,7 +1546,7 @@ def show_status(shoot: Path) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="./pl archive", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["report", "status", "push", "drop", "pull", "expire"])
+    ap.add_argument("command", choices=["report", "status", "push", "drop", "pull", "expire", "trim"])
     ap.add_argument("shoot", nargs="?")
     ap.add_argument("--apply", action="store_true", help="actually do it")
     ap.add_argument("--force", action="store_true",
@@ -1130,6 +1555,10 @@ def main() -> int:
                     help="expire: days since the shoot was finished (default: its retain_days, else the library's, else 365)")
     ap.add_argument("--keepers", action="store_true",
                     help="expire: include the frames you chose, which are protected by default")
+    ap.add_argument("--as", dest="form", choices=["raw", "packed"], default="raw",
+                    help="push: the ARWs as they are (raw), or each burst packed first into one smaller file (packed)")
+    ap.add_argument("--only", dest="only", choices=["raw", "packed", "both"], default="both",
+                    help="trim: which copies in iCloud to remove when this Mac holds the RAWs")
     ap.add_argument("--yes-delete-originals", dest="destroy", action="store_true",
                     help="expire: also remove archived frames whose local original is gone. This destroys photographs.")
     a = ap.parse_args()
@@ -1153,7 +1582,8 @@ def main() -> int:
     # while being recorded in the real shoot's manifest.
     p = library.paths(p.resolve()).shoot
     return {"status": lambda: show_status(p),
-            "push": lambda: push(p, a.apply, a.force),
+            "push": lambda: push(p, a.apply, a.force, a.form),
+            "trim": lambda: trim(p, a.apply, a.only),
             "drop": lambda: drop(p, a.apply),
             "pull": lambda: pull(p, a.apply),
             "expire": lambda: expire(p, a.apply, a.after, a.keepers, a.destroy)}[a.command]()

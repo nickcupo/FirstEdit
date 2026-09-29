@@ -2234,7 +2234,7 @@ def test_taking_one_off_the_list_takes_it_out_of_the_count_too(srv, lib, fake_wo
 
 
 def test_a_push_of_a_shoot_he_has_not_finished_goes_on_the_list(srv, lib):
-    """Copy the RAWs to iCloud the same night, before Finish: it copies and
+    """Back Up to iCloud the same night, before Finish: it copies and
     removes nothing, so the list takes it for a shoot not marked finished,
     which it used to turn away. Removing the local RAWs is what waits for
     Finish (archive.drop), and that is never on the list."""

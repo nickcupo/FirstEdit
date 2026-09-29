@@ -561,8 +561,8 @@ def _no_terminal_in(line: str, tmp_path: Path) -> None:
 
 
 def test_after_a_storage_job_the_panel_is_told_the_result_in_its_own_words(tmp_path, monkeypatch, capsys):
-    """After Copy the RAWs to iCloud the panel said `./pl archive drop` and his
-    whole home path; after Remove the Local RAWs, `./pl archive pull … --apply`;
+    """After Back Up to iCloud the panel said `./pl archive drop` and his
+    whole home path; after Remove from This Mac, `./pl archive pull … --apply`;
     after Take Back the Cache, "…this command works again." in lower case. The
     studio marks every job it starts, and the last line is then the result,
     naming the app's buttons. The same commands typed in a terminal keep their
@@ -578,12 +578,12 @@ def test_after_a_storage_job_the_panel_is_told_the_result_in_its_own_words(tmp_p
     assert archive.push(flat, apply=True, force=False) == 0
     line = _said_on_the_panel(capsys.readouterr().out)
     assert line.startswith("2 copied and verified, 0 failed."), line
-    assert "Remove the Local RAWs" in line, line
+    assert "Remove from This Mac" in line, line
     _no_terminal_in(line, tmp_path)
 
     assert archive.drop(flat, apply=True) == 0
     line = _said_on_the_panel(capsys.readouterr().out)
-    assert line == "Removed 2 originals and their links; 16 KB back. Bring the RAWs Back brings them down again.", line
+    assert line == "Removed 2 originals and their links; 16 KB back. Bring Back from iCloud brings them down again.", line
     _no_terminal_in(line, tmp_path)
 
     assert archive.pull(flat, apply=True) == 0
@@ -668,7 +668,7 @@ def _everything_in(shoot: Path) -> dict[str, tuple[int, str, int]]:
 
 
 def test_a_shoot_not_finished_is_copied_up_and_nothing_here_is_removed(tmp_path, monkeypatch, capsys):
-    """Copy the RAWs to iCloud the same night, before Finish: a backup before
+    """Back Up to iCloud the same night, before Finish: a backup before
     the card is formatted for the next shoot. It copies and reads back, and
     every file of the shoot is where it was, byte for byte, with the same
     names on the same bytes. It used to refuse any shoot not marked finished."""
@@ -688,7 +688,7 @@ def test_a_shoot_not_finished_is_copied_up_and_nothing_here_is_removed(tmp_path,
 
 def test_removing_the_local_raws_waits_for_finish_even_once_they_are_up(tmp_path, monkeypatch, capsys):
     """The rule push used to keep, where it belongs now: the RAWs of a shoot
-    he has not finished are still going to be read, so Remove the Local RAWs
+    he has not finished are still going to be read, so Remove from This Mac
     refuses it, dry run or not, and nothing is removed. Finished, the same
     drop goes ahead - the control that shows the refusal is the only reason."""
     monkeypatch.setenv("PIPELINE_FOR_APP", "1")

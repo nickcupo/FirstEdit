@@ -803,7 +803,7 @@ def reclaim(shoot_path: Path, apply: bool = False) -> int:
         print(f"\n  {up} of its frames are not on this disk because they were archived; archive.json says"
               "\n  where. Their caches are derived from photographs that still exist, so they are in the"
               "\n  list above - bring the frames back first if you want them: "
-              + ("Bring the RAWs Back." if for_the_app() else f"./pl archive pull {shoot.path.name} --apply"))
+              + ("Bring Back from iCloud." if for_the_app() else f"./pl archive pull {shoot.path.name} --apply"))
     if not apply:
         # The page draws its list by running this same command without
         # --apply, as a job with the same one bar. There is no loop on that
@@ -962,8 +962,13 @@ def archived_elsewhere(shoot: Shoot) -> dict[str, bool]:
         import archive as amod
     except ImportError:            # archive.py is optional; verify is not
         return {}
-    man = amod.load_manifest(shoot.path).get("frames") or {}
-    return {name: amod.dest_for(shoot.path, name).exists() for name in man}
+    man = amod.load_manifest(shoot.path)
+    out = {name: amod.dest_for(shoot.path, name).exists() for name in man.get("frames") or {}}
+    # A frame whose copy up there is a packed burst (burstpack.py) went to
+    # iCloud inside that file: it is archived if the file is there.
+    for name, (file, _fr) in amod.packed_frames(man).items():
+        out[name] = out.get(name, False) or amod.packed_dest(shoot.path, file).exists()
+    return out
 
 
 def verify(shoot_path: Path, record: bool = False, accept_drift: bool = False,

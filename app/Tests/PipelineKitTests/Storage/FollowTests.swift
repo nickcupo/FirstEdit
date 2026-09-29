@@ -6,7 +6,7 @@ import Testing
 
 /// The panel follows the job it started, and reads itself again when it ends.
 ///
-/// The bug: he pressed Copy the RAWs to iCloud, confirmed 36 GB, and when the
+/// The bug: he pressed Back Up to iCloud, confirmed 36 GB, and when the
 /// copy finished the panel still said "nothing in iCloud · one copy". It was
 /// loaded once, when it appeared; `reloadAfterJob` existed and nothing called
 /// it. Check Every Original started a job and threw its answer away, so its
@@ -213,18 +213,18 @@ struct Following {
            would copy 3 frames, 24 KB, to /scratch/icloud/Photo Pipeline Archive
              3/3 copied and verified
 
-           3 copied and verified, 0 failed. iCloud still has to upload them, and Remove the Local RAWs takes none until it has.
+           3 copied and verified, 0 failed. iCloud still has to upload them, and Remove from This Mac takes none until it has.
          """,
-         "3 copied and verified, 0 failed. iCloud still has to upload them, and Remove the Local RAWs takes none until it has."),
+         "3 copied and verified, 0 failed. iCloud still has to upload them, and Remove from This Mac takes none until it has."),
         ("""
          $ python archive.py drop /scratch/photos/shoots/2026-09-13-dog --apply
            2026-09-13-dog: 3 frames verified in iCloud, 0 refused
 
            would free 24 KB by removing 3 originals
 
-           Removed 3 originals and their links; 24 KB back. Bring the RAWs Back brings them down again.
+           Removed 3 originals and their links; 24 KB back. Bring Back from iCloud brings them down again.
          """,
-         "Removed 3 originals and their links; 24 KB back. Bring the RAWs Back brings them down again."),
+         "Removed 3 originals and their links; 24 KB back. Bring Back from iCloud brings them down again."),
         ("""
          $ python archive.py pull /scratch/photos/shoots/2026-09-13-dog --apply
            2026-09-13-dog: 3 frames to bring back, 24 KB

@@ -4,7 +4,7 @@ import Foundation
 ///
 /// "Job" is ours, not his. The engine calls a piece of work a job because a
 /// job is what a process is; on screen it is the thing he already calls it —
-/// **Cull**, **Write the presets**, **Copy the RAWs to iCloud** — and the
+/// **Cull**, **Write the presets**, **Back Up to iCloud** — and the
 /// list is a list of work, not a queue of jobs. DESIGN.md §2.13's table is
 /// the source of every word in `what(_:)`, and where the app has no word for
 /// a kind the engine's own title is printed rather than a guess.
@@ -57,9 +57,10 @@ extension Strings {
             case "spread": return q("queue.what.spread", "Write presets for the burst", "A piece of work on the list.")
             case "reel": return q("queue.what.reel", "Cut a reel", "A piece of work on the list.")
             case "instagram": return q("queue.what.instagram", "Make the Instagram copies", "A piece of work on the list.")
-            case "stor-push": return q("queue.what.push", "Copy the RAWs to iCloud", "A piece of work on the list.")
-            case "stor-pull": return q("queue.what.pull", "Bring the RAWs back", "A piece of work on the list.")
+            case "stor-push": return q("queue.what.push", "Back Up to iCloud", "A piece of work on the list.")
+            case "stor-pull": return q("queue.what.pull", "Bring back from iCloud", "A piece of work on the list.")
             case "stor-check": return q("queue.what.check", "Check every original", "A piece of work on the list.")
+            case "stor-checkpacked": return q("queue.what.checkPacked", "Check the packed bursts", "A piece of work on the list.")
             // A plan is named for what it checks. All five were "Work out
             // what would go", which a copy to iCloud does not do, while the
             // notification that sent him to the row named the plan itself.
@@ -67,6 +68,7 @@ extension Strings {
             case "plan-pull": return q("queue.what.planPull", "Check what would come back", "A storage plan on the list.")
             case "plan-drop": return q("queue.what.planDrop", "Check what would be removed", "A storage plan on the list.")
             case "plan-expire": return q("queue.what.planExpire", "Check what would be let go", "A storage plan on the list.")
+            case "plan-trim": return q("queue.what.planTrim", "Check which copies in iCloud could go", "A storage plan on the list.")
             case "plan-reclaim":
                 return q("queue.what.planReclaim", "Check what cache would be taken back", "A storage plan on the list.")
             default: return nil

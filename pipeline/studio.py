@@ -285,6 +285,10 @@ STAGE_WORDS = {
     "push": ("copying to iCloud", "frames"), "drop": ("removing local originals", "frames"),
     "pull": ("bringing frames back", "frames"), "expire": ("removing from iCloud", "files"),
     "check": ("checking every original", "frames"), "reclaim": ("taking back cache", "files"),
+    "pack": ("packing bursts", "frames"),
+    "checkpacked": ("checking the packed bursts", "frames"),
+    "trim": ("removing copies from iCloud", "files"),
+    "unpack": ("unpacking", "frames"),
 }
 INGEST_WEIGHTS = {"copy": 70, "verify": 30}
 # By what was asked of the copy. Without a check there is no second stage, so
@@ -309,7 +313,7 @@ SETUP_WEIGHTS = {"clip": 100}
 UPDATE_WEIGHTS = {"download": 90, "stage": 10}
 # One stage each: a push is a push. Held as a dict per verb so the bar's
 # arithmetic below is the same for these as it is for a cull.
-STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim")}
+STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack", "checkpacked", "trim", "unpack")}
 # By kind, for the jobs that are one stage long and are not storage verbs. An
 # Instagram make was weighed against the cull's table, where "instagram" is
 # not a stage, and its bar sat at 0% until it ended. The planning pass is added
@@ -2896,7 +2900,7 @@ class Jobs:
         # studio was not passing it on to the work.
         #
         # PIPELINE_FOR_APP, so a storage command ends on its result in the
-        # app's words ("… Bring the RAWs Back brings them down again") rather
+        # app's words ("… Bring Back from iCloud brings them down again") rather
         # than on a hint to a typist carrying his home path: the panel says
         # that last line under how the job ended (common.for_the_app).
         #
@@ -3888,6 +3892,12 @@ def storage(s: Shoot) -> dict:
     # can settle without downloading them, so the words beside the button can
     # say why the count is short of the shoot.
     sm["drop_evicted"] = sum(1 for r in raw if r["here"] and r["up"] and not r.get("up_local"))
+    # Which form the copies take, for the buttons that choose one: the ARWs up
+    # there, the packed bursts up there, and the packed bursts in the shoot.
+    whole = amod.load_manifest(s.folder)
+    sm["raw_up"] = sum(1 for n in whole.get("frames") or {} if amod.dest_for(s.folder, n).exists())
+    sm["packed_up"] = sum(1 for f in whole.get("packed") or {} if amod.packed_dest(s.folder, f).exists())
+    sm["packed_here"] = len(amod.local_packed(s.folder))
     m = rmod.measure(rmod.Shoot(s.folder))
     cnt, tot, where = rmod.last_copy_renderings(m["shoot"])
     lib = {}
@@ -4003,7 +4013,7 @@ def library() -> dict:
 # page and the terminal could tell him two different stories about the same
 # shoot, and only one of them would be the one that runs.
 
-STOR_VERBS = ("push", "drop", "pull", "expire", "reclaim")
+STOR_VERBS = ("push", "drop", "pull", "expire", "reclaim", "pack", "trim")
 
 
 def _s(n: int, one: str, many: str = "") -> str:
@@ -4016,6 +4026,13 @@ def _stor_argv(s: Shoot, what: str, body: dict, apply: bool) -> list[str]:
     """Exactly the command line he would have typed himself."""
     if what == "reclaim":
         cmd = [PY, str(HERE / "reclaim.py"), "reclaim", str(s.folder)]
+    elif what == "pack":
+        # Burstpack: every burst into packed/, each checked frame by frame
+        # before it is kept. It removes nothing, so it sits with push and pull.
+        cmd = [PY, str(HERE / "burstpack.py"), "shoot", str(s.folder)]
+    elif what == "checkpacked":
+        # Reads only: every packed burst unpacked in memory and checked.
+        return [PY, str(HERE / "burstpack.py"), "check", str(s.folder)]
     elif what == "check":
         cmd = [PY, str(HERE / "reclaim.py"), "verify", str(s.folder)]
         return cmd + (["--record"] if body.get("record") else [])
@@ -4023,6 +4040,11 @@ def _stor_argv(s: Shoot, what: str, body: dict, apply: bool) -> list[str]:
         cmd = [PY, str(HERE / "archive.py"), what, str(s.folder)]
         if what == "push" and body.get("force"):
             cmd.append("--force")
+        # What goes up, and which copies up there go: the choice on the sheet.
+        if what == "push" and body.get("form") == "packed":
+            cmd += ["--as", "packed"]
+        if what == "trim":
+            cmd += ["--only", body.get("form") if body.get("form") in ("raw", "packed") else "both"]
         if what == "expire":
             if body.get("after") is not None:
                 cmd += ["--after", str(int(body["after"]))]
@@ -4049,7 +4071,8 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
         m = re.search(r"^\s*would copy (\d+) frames, (.+?), to ", text, re.M)
         if m:
             counts["frames"], bytes_text = int(m.group(1)), m.group(2)
-            label = f"Copy {bytes_text} up"
+            label = (f"Pack and copy {_s(counts['frames'], 'frame')} up" if body.get("form") == "packed"
+                     else f"Copy {bytes_text} up")
         for pat in (r"^\s*(\d+ of this shoot's own RAWs are already evicted.*)$",
                     r"^\s*(iCloud Drive is not .*)$"):
             refusals += [x.strip() for x in re.findall(pat, text, re.M)]
@@ -4060,16 +4083,23 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
         for pat in (r"^\s*(\S+ is not finished yet, so its RAWs .*)$", r"^\s*(iCloud Drive is not .*)$"):
             refusals += [x.strip() for x in re.findall(pat, text, re.M)]
         m = re.search(r"^\s*would free (.+?) by removing (\d+) originals", text, re.M)
+        pk = re.search(r"^\s*and (\d+) packed bursts on this Mac", text, re.M)
+        counts["packed"] = int(pk.group(1)) if pk else 0
         if m:
             bytes_text, counts["frames"] = m.group(1), int(m.group(2))
             label = f"Remove {_s(counts['frames'], 'original')} and free {bytes_text}"
+            if counts["packed"] and not counts["frames"]:
+                label = f"Remove {_s(counts['packed'], 'packed burst')} and free {bytes_text}"
+            elif counts["packed"]:
+                label = (f"Remove {_s(counts['frames'], 'original')} and "
+                         f"{_s(counts['packed'], 'packed burst')}, and free {bytes_text}")
         e = re.search(r"^\s*and (\d+) further hard links", text, re.M)
         counts["links"] = int(e.group(1)) if e else 0
         refusals += [f"kept {n}: {w}" for n, w in re.findall(r"^\s*kept\s+(\S+): (.+)$", text, re.M)]
         more = re.search(r"^\s*\.\.\. and (\d+) more$", text, re.M)
         if more:
             refusals.append(f"… and {more.group(1)} more refused for the same kinds of reason")
-        ready = ready and counts.get("frames", 0) > 0
+        ready = ready and (counts.get("frames", 0) > 0 or counts.get("packed", 0) > 0)
     elif what == "pull":
         m = re.search(r"(\d+) frames to bring back, (.+)$", text, re.M)
         if m:
@@ -4108,6 +4138,19 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
             label = (f"Remove {_s(counts['files'], 'spare copy', 'spare copies')} from iCloud "
                      f"({bytes_text}). Every one of these frames keeps its original in this shoot.")
         ready = ready and bool(counts.get("files"))
+    elif what == "trim":
+        m = re.search(r"^\s*would remove (\d+) files from iCloud, (.+?); every frame", text, re.M)
+        if m:
+            counts["files"], bytes_text = int(m.group(1)), m.group(2)
+            label = f"Remove {_s(counts['files'], 'copy', 'copies')} from iCloud ({bytes_text})"
+        ready = ready and counts.get("files", 0) > 0
+    elif what == "pack":
+        m = re.search(r"^\s*would pack (\d+) frames in (\d+) bursts and (\d+) single frames?, (.+?), into ", text, re.M)
+        if m:
+            counts["frames"], counts["bursts"], counts["singles"] = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            bytes_text = m.group(4)
+            label = f"Pack {_s(counts['frames'], 'frame')} ({bytes_text})"
+        ready = ready and counts.get("frames", 0) > 0
     elif what == "reclaim":
         m = re.search(r"^\s+(\d+) files\s+(\S+ \S+)\s+total\s*$", text, re.M)
         if m:
@@ -4144,6 +4187,15 @@ def _stor_state(s: Shoot, what: str) -> str:
         keep = amod.keepers_of(s.folder)
         h.update(("|".join(sorted(keep)) if keep is not None else "?no key?").encode())
         h.update(f"|{amod.retention(s.folder)}|{amod.days_since_finished(s.folder)}\n".encode())
+    if what in ("pack", "push", "drop", "trim", "pull"):
+        # The packed bursts, here and on record up there: one packed since the
+        # list was drawn, or one removed, changes what the run would do.
+        packed = s.folder / "packed"
+        for p in sorted(packed.glob("*.fbp")) if packed.is_dir() else []:
+            h.update(f"packed|{p.name}|{p.stat().st_size}\n".encode())
+        rec = amod.load_manifest(s.folder).get("packed") or {}
+        for name in sorted(rec):
+            h.update(f"up|{name}|{rec[name].get('sha256')}\n".encode())
     if what == "reclaim":
         import reclaim as rmod
         sh = rmod.Shoot(s.folder)
@@ -4328,8 +4380,10 @@ def _stor_body(q: dict) -> dict:
             after = int(q["after"][0])
         except ValueError:
             after = None
+    form = q.get("form", [""])[0]
     return {"force": flag("force"), "keepers": flag("keepers"),
-            "originals": flag("originals"), "after": after}
+            "originals": flag("originals"), "after": after,
+            "form": form if form in ("raw", "packed", "both") else None}
 
 
 def read_plan(s: Shoot, what: str, body: dict) -> dict:
@@ -4391,7 +4445,7 @@ PLAN_PATTERNS = [
     # archive.py says this at a terminal; the app is told its own sentence
     # (`for_the_app`), and this is its words should the typist's reach it.
     (re.compile(r"bring them down again with: \./pl archive pull \S+ --apply"),
-     "Bring the RAWs Back brings them down again."),
+     "Bring Back from iCloud brings them down again."),
 ]
 
 
@@ -4446,7 +4500,11 @@ STOR_TITLES = {"push": "copying the RAWs of {n} to iCloud",
                "pull": "bringing the RAWs of {n} back",
                "expire": "letting go of the RAWs of {n} in iCloud",
                "reclaim": "taking back {n}'s cache",
-               "check": "checking every original of {n}"}
+               "check": "checking every original of {n}",
+               "pack": "packing the bursts of {n}",
+               "checkpacked": "checking the packed bursts of {n}",
+               "trim": "removing copies of {n} from iCloud",
+               "unpack": "unpacking the bursts of {n}"}
 
 
 # ------------------------------------------ the list of work he asked for
@@ -4493,7 +4551,15 @@ def _q_shoot(name: str) -> Shoot:
 
 
 def _q_frames(s: Shoot) -> int:
-    return sum(1 for p in s.raw.iterdir() if p.suffix.lower() in RAW_EXTS) if s.raw.is_dir() else 0
+    """The shoot's photographs: the RAWs here, and when none are, the ones
+    recorded in iCloud, which the cull, the presets and the PhotoLab folder
+    bring back by themselves before they start (archive.restore_for_work)."""
+    here = sum(1 for p in s.raw.iterdir() if p.suffix.lower() in RAW_EXTS) if s.raw.is_dir() else 0
+    if here:
+        return here
+    import archive as amod
+    whole = amod.load_manifest(s.folder)
+    return len({*(whole.get("frames") or {}), *amod.packed_frames(whole)})
 
 
 def _q_burst(o: dict) -> str:
@@ -4842,7 +4908,7 @@ def _b_stor(what: str):
         # Finish, and that is never on the list (NEVER_QUEUED).
         verb = "check" if what == "check" else what
         return {"title": STOR_TITLES[verb].format(n=name),
-                "does": {"push": "Copy the RAWs to iCloud and read every one of them back.",
+                "does": {"push": "Back Up to iCloud and read every one of them back.",
                          "pull": "Bring the RAWs back down from iCloud.",
                          "check": "Read every original back off the disk and check it."}[verb],
                 "cmd": _stor_argv(s, verb, o, apply=(verb != "check")),
@@ -4858,7 +4924,9 @@ PLAN_DOES = {"push": "Check what would be copied to iCloud, and show you what it
              "pull": "Check what would come back from iCloud, and show you what it found.",
              "drop": "Check which local RAWs would be removed, and show you what it found.",
              "expire": "Check which RAWs in iCloud would be let go, and show you what it found.",
-             "reclaim": "Check what cache would be taken back, and show you what it found."}
+             "reclaim": "Check what cache would be taken back, and show you what it found.",
+             "pack": "Check which bursts would be packed, and show you what it found.",
+             "trim": "Check which copies in iCloud could go, and show you what it found."}
 
 
 def _b_plan(what: str):
@@ -4893,6 +4961,8 @@ WORK: dict[str, object] = {
     "plan-drop": _b_plan("drop"),
     "plan-expire": _b_plan("expire"),
     "plan-reclaim": _b_plan("reclaim"),
+    "plan-pack": _b_plan("pack"),
+    "plan-trim": _b_plan("trim"),
 }
 
 # What may never be put on the list, and the sentence he is told instead.
@@ -4913,6 +4983,9 @@ NEVER_QUEUED = {
     "stor-expire": "Letting go of RAWs in iCloud is not something to leave on a list. Nothing on this "
                    "Mac would hold those photographs afterwards, and the count you typed has to be "
                    "the count of the list in front of you.",
+    "stor-trim": "Removing copies from iCloud is not something to leave on a list. It runs against the "
+                 "list you read a moment before, and a list an hour old is about a shoot nobody has "
+                 "looked at since.",
     "stor-reclaim": "Taking the cache back is not something to leave on a list. It runs against the "
                     "list you read a moment before, and a list an hour old is about a shoot nobody "
                     "has looked at since.",
@@ -6951,9 +7024,22 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/storage/check":
                 # Nothing to confirm: verify reads and compares, and --record
                 # only fills in checksums that were never taken. It is the one
-                # storage job with no plan in front of it.
-                return self._job(body, "stor-check", STOR_TITLES["check"].format(n=s.folder.name),
-                                 _stor_argv(s, "check", body, apply=False), _job_log(s), s.folder.name)
+                # storage job with no plan in front of it. {"packed": true}
+                # asks the same of the shoot's packed bursts, which also only
+                # reads.
+                verb = "checkpacked" if body.get("packed") else "check"
+                return self._job(body, f"stor-{verb}", STOR_TITLES[verb].format(n=s.folder.name),
+                                 _stor_argv(s, verb, body, apply=False), _job_log(s), s.folder.name)
+            if u.path == "/api/storage/unpack":
+                # Writes only new files, into a folder he chose in the app's
+                # own panel; nothing in the shoot or in iCloud changes. So no
+                # plan, as with the checks.
+                dest = str(body.get("dest") or "")
+                if not dest.startswith("/") or "\0" in dest:
+                    return self._json({"error": "choose a folder to unpack into"})
+                argv = [PY, str(HERE / "burstpack.py"), "export", str(s.folder), dest]
+                return self._job(body, "stor-unpack", STOR_TITLES["unpack"].format(n=s.folder.name),
+                                 argv, _job_log(s), s.folder.name)
             if u.path == "/api/storage/plan":
                 what = body.get("what")
                 if what not in STOR_VERBS:

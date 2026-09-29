@@ -168,8 +168,8 @@ struct JobNotificationTests {
     func titleCase() {
         #expect(JobWords.titled(Self.job("presets", code: 0)) == "Write the Presets")
         #expect(JobWords.titled(Self.job("gather", code: 0)) == "Build the PhotoLab Folder")
-        #expect(JobWords.titled(Self.job("stor-push", code: 0)) == "Copy the RAWs to iCloud")
-        #expect(JobWords.titled(Self.job("stor-pull", code: 0)) == "Bring the RAWs Back")
+        #expect(JobWords.titled(Self.job("stor-push", code: 0)) == "Back Up to iCloud")
+        #expect(JobWords.titled(Self.job("stor-pull", code: 0)) == "Bring Back from iCloud")
         #expect(JobWords.titled(Self.job("plan-push", code: 0)) == "Check What Would Be Copied")
         #expect(JobWords.titled(Self.job("plan-reclaim", code: 0)) == "Check What Cache Would Be Taken Back")
         // The row the notification opens names the plan the same way.

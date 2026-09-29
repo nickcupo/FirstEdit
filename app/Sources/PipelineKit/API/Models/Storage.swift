@@ -54,6 +54,9 @@ public struct StorageArchive: Sendable, Hashable {
     public let todo, pullable, droppable, drop_evicted, missing, lost: Int
     public let bytes_here, bytes_up: Int
     public let here_text, up_text, todo_text, pullable_text, droppable_text: String
+    /// Which form the copies take: ARWs in iCloud, packed bursts in iCloud,
+    /// packed bursts in the shoot on this Mac.
+    public let raw_up, packed_up, packed_here: Int
 
     init(fields f: Fields) {
         frames = f.int("frames"); here = f.int("here"); here_evicted = f.int("here_evicted")
@@ -64,6 +67,7 @@ public struct StorageArchive: Sendable, Hashable {
         here_text = f.string("here_text"); up_text = f.string("up_text")
         todo_text = f.string("todo_text"); pullable_text = f.string("pullable_text")
         droppable_text = f.string("droppable_text")
+        raw_up = f.int("raw_up"); packed_up = f.int("packed_up"); packed_here = f.int("packed_here")
     }
 }
 
@@ -212,11 +216,16 @@ public struct PlanOptions: Sendable, Hashable {
     /// Include the frames with no other copy — the ones that cease to exist.
     public var originals: Bool?
     public var after: Int?
+    /// Which form: for a copy up, "raw" or "packed"; for removing copies from
+    /// iCloud, "raw", "packed" or "both".
+    public var form: String?
 
     public static let none = PlanOptions()
 
-    public init(force: Bool? = nil, keepers: Bool? = nil, originals: Bool? = nil, after: Int? = nil) {
+    public init(force: Bool? = nil, keepers: Bool? = nil, originals: Bool? = nil, after: Int? = nil,
+                form: String? = nil) {
         self.force = force; self.keepers = keepers; self.originals = originals; self.after = after
+        self.form = form
     }
 
     public var query: [String: String] {
@@ -225,6 +234,7 @@ public struct PlanOptions: Sendable, Hashable {
         if keepers == true { q["keepers"] = "1" }
         if originals == true { q["originals"] = "1" }
         if let after { q["after"] = String(after) }
+        if let form { q["form"] = form }
         return q
     }
 }

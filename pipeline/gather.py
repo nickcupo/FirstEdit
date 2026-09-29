@@ -416,6 +416,14 @@ def main() -> int:
               "   (--fresh: rebuild from the sidecars beside the RAWs; edits made in edit/ are set"
               " aside in decisions/, not promoted)")
         return 1
+    # The PhotoLab folder is links to the RAWs: any moved off this Mac come
+    # back first (archive.restore_for_work), checked, as though never gone.
+    try:
+        import archive
+        if archive.restore_for_work(Path(args[0])):
+            return 1
+    except library.NotAShoot:
+        pass
     try:
         out, r = _build(Path(args[0]).expanduser().resolve(), fresh)
     except (FileNotFoundError, ValueError) as e:
