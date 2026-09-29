@@ -417,9 +417,9 @@ def test_packed_bursts_go_up_come_down_and_let_the_raws_go(tmp_path, monkeypatch
     import archive
     import reclaim
     shoot, raws = _finished_shoot(tmp_path, monkeypatch)
-    assert archive.push(shoot, apply=False) == 0
-    assert "5 of them as 2 packed bursts" in capsys.readouterr().out
-    assert archive.push(shoot, apply=True) == 0
+    assert archive.push(shoot, apply=False, form="packed") == 0
+    assert "packed first" in capsys.readouterr().out
+    assert archive.push(shoot, apply=True, form="packed") == 0
     up = tmp_path / "icloud" / shoot.name
     assert sorted(p.name for p in (up / "packed").iterdir()) == ["burst-0.fbp", "burst-1.fbp"]
     assert not list(up.glob("*.ARW")), "the packed bursts went up instead of the RAWs"
@@ -428,7 +428,7 @@ def test_packed_bursts_go_up_come_down_and_let_the_raws_go(tmp_path, monkeypatch
     assert all(r["up"] and r["recorded"] for r in archive.status(shoot)["rows"])
     assert bp.check_shoot(shoot, log=lambda *_: None) == 0
     assert archive.push(shoot, apply=False) == 0
-    assert "nothing to do." in capsys.readouterr().out, "nothing goes up twice"
+    assert "nothing to do." in capsys.readouterr().out, "nothing goes up twice, in either form"
 
     assert archive.drop(shoot, apply=True) == 0
     assert not list((shoot / "raw").iterdir())
@@ -446,7 +446,7 @@ def test_packed_bursts_go_up_come_down_and_let_the_raws_go(tmp_path, monkeypatch
 def test_a_packed_copy_that_is_not_the_one_pushed_frees_nothing(tmp_path, monkeypatch, capsys):
     import archive
     shoot, raws = _finished_shoot(tmp_path, monkeypatch)
-    archive.push(shoot, apply=True)
+    archive.push(shoot, apply=True, form="packed")
     q = archive.packed_dest(shoot, "burst-0.fbp")
     data = bytearray(q.read_bytes())
     data[-100] ^= 1
@@ -464,7 +464,7 @@ def test_a_packed_copy_is_unpacked_before_it_is_believed(tmp_path, monkeypatch, 
     import archive
     from common import write_json_atomic
     shoot, raws = _finished_shoot(tmp_path, monkeypatch)
-    archive.push(shoot, apply=True)
+    archive.push(shoot, apply=True, form="packed")
     q = archive.packed_dest(shoot, "burst-1.fbp")
     data = bytearray(q.read_bytes())
     data[-100] ^= 1
@@ -485,8 +485,119 @@ def test_a_raw_changed_after_packing_goes_up_as_itself(tmp_path, monkeypatch, ca
     b[200] ^= 1
     p.write_bytes(bytes(b))
     assert bp.check_shoot(shoot, log=lambda *_: None) == 1, "the check says the packed copy is not this RAW"
-    archive.push(shoot, apply=True)
+    archive.push(shoot, apply=True, form="packed")
     assert "does not unpack to the RAWs here" in capsys.readouterr().out
     up = tmp_path / "icloud" / shoot.name
     assert sorted(x.name for x in up.glob("*.ARW")) == ["TSC01003.ARW", "TSC01004.ARW"]
     assert [x.name for x in (up / "packed").iterdir()] == ["burst-0.fbp"]
+
+
+def test_raw_goes_up_as_raw_even_beside_packed_bursts(tmp_path, monkeypatch):
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    assert archive.push(shoot, apply=True) == 0
+    up = tmp_path / "icloud" / shoot.name
+    assert sorted(p.name for p in up.glob("*.ARW")) == sorted(raws)
+    assert not (up / "packed").exists()
+
+
+def test_packed_packs_first_when_nothing_is_packed_yet(tmp_path, monkeypatch):
+    import archive
+    shoot = _shoot(tmp_path)
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    assert not (shoot / "packed").exists()
+    assert archive.push(shoot, apply=True, form="packed") == 0
+    assert sorted(p.name for p in (tmp_path / "icloud" / shoot.name / "packed").iterdir()) == \
+        ["burst-0.fbp", "burst-1.fbp"]
+
+
+def test_copies_in_icloud_go_only_where_this_mac_has_the_raws(tmp_path, monkeypatch, capsys):
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    # Burst 0 up as RAWs, burst 1 packed: both forms at once.
+    for name in ("TSC01000.ARW", "TSC01001.ARW", "TSC01002.ARW"):
+        d = archive.dest_for(shoot, name)
+        d.parent.mkdir(parents=True, exist_ok=True)
+        d.write_bytes(raws[name])
+    man = archive.load_manifest(shoot)
+    man["frames"] = {n: {"bytes": len(raws[n]), "sha256": archive.sha256(archive.dest_for(shoot, n))}
+                     for n in ("TSC01000.ARW", "TSC01001.ARW", "TSC01002.ARW")}
+    from common import write_json_atomic
+    write_json_atomic(archive.manifest_path(shoot), man)
+    archive.push(shoot, apply=True, form="packed")
+    up = tmp_path / "icloud" / shoot.name
+    assert sorted(p.name for p in (up / "packed").iterdir()) == ["burst-1.fbp"]
+
+    # One RAW here changed: its copy up there stays, and the packed burst is untouched by --only raw.
+    (shoot / "raw" / "TSC01000.ARW").write_bytes(b"x" + raws["TSC01000.ARW"][1:])
+    assert archive.trim(shoot, apply=True, form="raw") == 0
+    out = capsys.readouterr().out
+    assert "TSC01000.ARW: the RAW here is not the one in iCloud" in out
+    assert sorted(p.name for p in up.glob("*.ARW")) == ["TSC01000.ARW"]
+    assert (up / "packed" / "burst-1.fbp").exists()
+    man = archive.load_manifest(shoot)
+    assert sorted(man["frames"]) == ["TSC01000.ARW"] and "burst-1.fbp" in man["packed"]
+
+    assert archive.trim(shoot, apply=True, form="packed") == 0
+    assert not (up / "packed" / "burst-1.fbp").exists()
+    assert archive.load_manifest(shoot)["packed"] == {}
+    assert sorted(p.name for p in (shoot / "raw").iterdir()) == sorted(raws), "no RAW here was touched"
+
+
+def test_with_the_raws_gone_every_copy_up_there_stays(tmp_path, monkeypatch, capsys):
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    archive.push(shoot, apply=True, form="packed")
+    archive.drop(shoot, apply=True)
+    assert not list((shoot / "raw").iterdir())
+    assert not list((shoot / "packed").iterdir()), "the packed bursts here went too, the same files being up"
+    capsys.readouterr()
+    assert archive.trim(shoot, apply=True) == 0
+    assert "nothing to remove." in capsys.readouterr().out
+    assert len(list((tmp_path / "icloud" / shoot.name / "packed").iterdir())) == 2
+    assert archive.pull(shoot, apply=True) == 0
+    assert {p.name: p.read_bytes() for p in (shoot / "raw").iterdir()} == raws
+
+
+def test_letting_go_keeps_the_record_of_packed_bursts(tmp_path, monkeypatch):
+    """expire rewrote archive.json from its ARW records alone, which forgot
+    every packed burst up there."""
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    (shoot / "shoot.json").write_text(json.dumps({"kind": "other", "finished": "2000-01-01"}))
+    archive.push(shoot, apply=True, form="packed")
+    d = archive.dest_for(shoot, "TSC01000.ARW")
+    d.write_bytes(raws["TSC01000.ARW"])
+    man = archive.load_manifest(shoot)
+    man["frames"]["TSC01000.ARW"] = {"bytes": len(raws["TSC01000.ARW"]), "sha256": archive.sha256(d)}
+    from common import write_json_atomic
+    write_json_atomic(archive.manifest_path(shoot), man)
+    archive.expire(shoot, True, 0, True, False)
+    assert not d.exists(), "the ARW spare was let go"
+    assert set(archive.load_manifest(shoot)["packed"]) == {"burst-0.fbp", "burst-1.fbp"}
+
+
+def test_the_sheets_read_the_forms_and_the_new_lists(tmp_path, monkeypatch, capsys):
+    studio = pytest.importorskip("studio")
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    s = studio.Shoot(shoot)
+    assert studio._stor_argv(s, "push", {"form": "packed"}, apply=True)[-3:] == ["--as", "packed", "--apply"]
+    assert "--as" not in studio._stor_argv(s, "push", {"form": "raw"}, apply=False)
+    assert studio._stor_argv(s, "trim", {"form": "packed"}, apply=False)[-2:] == ["--only", "packed"]
+    assert studio._stor_argv(s, "trim", {}, apply=False)[-2:] == ["--only", "both"]
+    assert studio._stor_body({"form": ["packed"]})["form"] == "packed"
+    assert studio._stor_body({"form": ["rm -rf"]})["form"] is None
+
+    archive.push(shoot, apply=False, form="packed")
+    plan = studio._parse_plan("push", capsys.readouterr().out, {"form": "packed"})
+    assert plan["ready"] and plan["label"] == "Pack and copy 5 frames up"
+    archive.push(shoot, apply=True, form="packed")
+    capsys.readouterr()
+    archive.trim(shoot, apply=False, form="both")
+    plan = studio._parse_plan("trim", capsys.readouterr().out, {"form": "both"})
+    assert plan["ready"] and plan["label"].startswith("Remove 2 copies from iCloud (")
+    archive.drop(shoot, apply=False)
+    plan = studio._parse_plan("drop", capsys.readouterr().out, {})
+    assert plan["ready"] and plan["counts"]["packed"] == 2
+    assert plan["label"].startswith("Remove 5 originals and 2 packed bursts, and free ")

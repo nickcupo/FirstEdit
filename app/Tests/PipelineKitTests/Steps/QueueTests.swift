@@ -123,7 +123,7 @@ struct QueueWordsTests {
         }
         #expect(Strings.Queue.what("cull") == "Cull")
         #expect(Strings.Queue.what("presets") == "Write the presets")
-        #expect(Strings.Queue.what("stor-push") == "Copy the RAWs to iCloud")
+        #expect(Strings.Queue.what("stor-push") == "Copy to iCloud")
     }
 
     @Test("a kind the app has no word for is the engine's own title, never a raw kind")

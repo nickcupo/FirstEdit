@@ -139,6 +139,7 @@ public struct PlanBody: Encodable, Sendable {
     public let keepers: Bool?
     public let originals: Bool?
     public let after: Int?
+    public let form: String?
     /// Take it into the engine's queue behind whatever is running, instead of
     /// being refused. This is what "Do It After" asks for: the queue is the
     /// engine's and has been all along, and the app asks for it by name
@@ -147,6 +148,7 @@ public struct PlanBody: Encodable, Sendable {
     public init(name: String, what: String, opts: PlanOptions = .none, queue: Bool = false) {
         self.name = name; self.what = what
         force = opts.force; keepers = opts.keepers; originals = opts.originals; after = opts.after
+        form = opts.form
         self.queue = queue ? true : nil
     }
 }
@@ -170,10 +172,12 @@ public struct ApplyBody: Encodable, Sendable {
     public let keepers: Bool?
     public let originals: Bool?
     public let after: Int?
+    public let form: String?
     public init(name: String, what: String, token: String, typed: String? = nil,
                 opts: PlanOptions = .none) {
         self.name = name; self.what = what; self.token = token; self.typed = typed
         force = opts.force; keepers = opts.keepers; originals = opts.originals; after = opts.after
+        form = opts.form
     }
 }
 

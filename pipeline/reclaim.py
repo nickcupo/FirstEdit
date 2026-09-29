@@ -803,7 +803,7 @@ def reclaim(shoot_path: Path, apply: bool = False) -> int:
         print(f"\n  {up} of its frames are not on this disk because they were archived; archive.json says"
               "\n  where. Their caches are derived from photographs that still exist, so they are in the"
               "\n  list above - bring the frames back first if you want them: "
-              + ("Bring the RAWs Back." if for_the_app() else f"./pl archive pull {shoot.path.name} --apply"))
+              + ("Bring Back from iCloud." if for_the_app() else f"./pl archive pull {shoot.path.name} --apply"))
     if not apply:
         # The page draws its list by running this same command without
         # --apply, as a job with the same one bar. There is no loop on that

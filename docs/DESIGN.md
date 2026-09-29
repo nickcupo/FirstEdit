@@ -1777,7 +1777,7 @@ page says only that it is finished and what it teaches from; what happened about
 the learning page's. Return presses it only once something is exported. The note above it: "Finish
 This Shoot records your keepers, and every later change to the cull is checked against all of them.
 The cull learns only from the frames you exported." It said to press it before removing the RAWs;
-Remove the Local RAWs now waits for it by itself (§2.8). One name for the step everywhere — Finish.
+Remove from This Mac now waits for it by itself (§2.8). One name for the step everywhere — Finish.
 **What Finish teaches is the frames he exported, not every frame he kept.** His answer, when the
 page said 368 kept beside 356 exported: "only train based on what i've exported. i tend to cull
 further during editing." The two numbers are two things now, said on two rows. The recorded keepers
@@ -2340,22 +2340,24 @@ the state row, not a second time at the end of the line. That clause is dropped 
 original is here; with nothing in iCloud and some not here either, the line ends on how many are
 ("· 1,200 of 1,558 on this Mac.").
 
-The frequent actions come first: **Copy the RAWs to iCloud…**, **Bring the RAWs Back…**, **Check Every
-Original**, **Take Back the Cache…**, and on a row of its own **Pack Bursts…** (`burstpack.py`,
-docs/BURSTPACK.md): each burst into one lossless file in `packed/`, the frame he kept stored whole
-and the rest as how they differ, every frame unpacked and checked before the file is kept. It
-removes nothing, so it is off the ladder like a copy, and it is off with a reason only when none of
-the shoot's RAWs are on this Mac. Beside it, **Check the Packed Bursts** unpacks each in memory and checks it, and reads only. A packed burst in iCloud is a copy push, drop and pull all accept (docs/BURSTPACK.md, "In iCloud"). Then a rule, 32 pt of space, and a group headed **Remove and
-delete** holding **Remove the Local RAWs…** and **Let Go of the RAWs in iCloud…** — in the page the
+The frequent actions come first: **Copy to iCloud…**, **Bring Back from iCloud…**, **Check Every
+Original**, **Take Back the Cache…**. Copy to iCloud's sheet asks the form, *RAW files* or
+*Packed, about half the size* (`burstpack.py`, docs/BURSTPACK.md), and a packed burst in iCloud is
+a copy push, drop and pull all accept. Once a shoot has packed bursts, **Check the Packed Bursts**
+sits on a row of its own; it unpacks each in memory, checks it, and reads only. Then a rule, 32 pt of space, and a group headed **Remove and
+delete** holding **Remove from This Mac…** and **Remove Copies from iCloud…** on one row (each
+removes one copy and keeps a checked one; the second's sheet asks *RAW copies*, *Packed copies* or
+*Both*, and takes a copy up there only when this Mac holds its RAWs, the same bytes), and **Let Go
+of the RAWs in iCloud…** on the next — in the page the
 destructive control sat 12 px above the button he presses at the end of nearly every shoot
 (FLOW-06). The frame-by-frame table stays a lazy disclosure, fetched only on first expand.
 
 **A button that can do nothing on this shoot is off, and says why.** Each one is read against the
 engine's own counts in `/api/storage` — `archive.todo`, `pullable`, `droppable`, `up`, and the
 retention lock's `finished` / `due` / `due_in_days` — and the reason is in its help and in a footnote
-under its group ("Bring the RAWs Back: Nothing of this shoot is in iCloud."). Where the way on is a
-button on the same page, the reason names it: Remove the Local RAWs on a shoot not yet finished says
-"… Press Finish This Shoot first." **Copy the RAWs to iCloud works before Finish**, the same night,
+under its group ("Bring Back from iCloud: Nothing of this shoot is in iCloud."). Where the way on is a
+button on the same page, the reason names it: Remove from This Mac on a shoot not yet finished says
+"… Press Finish This Shoot first." **Copy to iCloud works before Finish**, the same night,
 when he presses it: it copies and reads back and takes nothing away, here or there, and a backup
 before the card is formatted for the next shoot is the point of it. It refused any shoot not marked
 finished, days before he had finished editing, and the refusal pointed at the retired studio and a
@@ -2367,14 +2369,14 @@ makes no folder and records nothing, and says so in the app's words, with no pat
 not turned on on this Mac, so nothing was done. Turn it on in System Settings, then try again." On a finished shoot
 that was never archived, his commonest case, three of the six buttons each used to start a dry run,
 wait, and come back with one line: "has no archive manifest". A button that would do something
-carries the engine's figure for what it would move: **Copy the RAWs to iCloud (36.3 GB)…**.
+carries the engine's figure for what it would move: **Copy to iCloud (36.3 GB)…**.
 
 A three-rung ladder, chosen by what cannot be undone:
 
 | Rung | Examples | Treatment |
 |---|---|---|
 | Replaces the machine's own work | Cull Again, Write the Presets Again | Sheet naming what is kept. Cancel is the default button. No red. |
-| Removes a copy, keeps a checked one | Remove the Local RAWs, Take Back the Cache | Own group below the rule, label ends in "…". Sheet shows **the engine's own plan verbatim** in a monospaced list. The confirm button reads the consequence — **"Remove 1,558 Originals from This Mac"** — `.destructive` role, red, **not** the default. |
+| Removes a copy, keeps a checked one | Remove from This Mac, Take Back the Cache | Own group below the rule, label ends in "…". Sheet shows **the engine's own plan verbatim** in a monospaced list. The confirm button reads the consequence — **"Remove 1,558 Originals from This Mac"** — `.destructive` role, red, **not** the default. |
 | Deletes photographs | Let Go of the RAWs in iCloud | All of the above, plus: a separate unticked checkbox for "including the frames with no other copy", the doomed names listed verbatim, the keepers-protected count **frozen at the value the list was drawn against**, and a text field — *"Type the number of photographs to let go: 1558"* — with the red button disabled until it matches. Title: *"Let go of 1,558 photographs?"* Body: "They are in iCloud and nothing on this Mac will hold them afterwards. This cannot be undone." |
 
 Rules that hold everywhere: no destructive action in a toolbar, in a context menu's first group, or
@@ -2416,8 +2418,8 @@ page is picked up the same way. The panel used to load once, on appear: a finish
 **The line after a job is its result, in the app's words.** The studio marks every job it starts
 (`PIPELINE_FOR_APP`), and archive.py and reclaim.py then end on one line that says what happened and
 names the next button, never a command or a path: "54 copied and verified, 0 failed. iCloud still
-has to upload them, and Remove the Local RAWs takes none until it has.", "Removed 54 originals and
-their links; 1.1 GB back. Bring the RAWs Back brings them down again.", "Removed 164 files, 140.8 MB.
+has to upload them, and Remove from This Mac takes none until it has.", "Removed 54 originals and
+their links; 1.1 GB back. Bring Back from iCloud brings them down again.", "Removed 164 files, 140.8 MB.
 The next cull makes the cache again." Check Every Original ends on its count, not on the `--record`
 flag it does not use. They ended on `./pl archive drop` with his home path, `./pl archive pull …
 --apply`, and "…this command works again." in lower case. Typed in a terminal, the same commands
@@ -2452,10 +2454,10 @@ and ticking it sends the number there at once; it used to send nothing until the
 afterwards, and came back unticked on every visit. Unticking takes nothing back.
 
 **Every way back names the command that copies.** Where the engine tells him how to bring RAWs back —
-Edit in PhotoLab on an archived shoot, after Remove the Local RAWs, in the cache sheet, in Check Every
+Edit in PhotoLab on an archived shoot, after Remove from This Mac, in the cache sheet, in Check Every
 Original — it names the shoot, not its path, and `--apply`: the plain `./pl archive pull` it used
 to name is a dry run, printed his whole home path, and in two places named no shoot at all. Where the
-line reaches the app it names Bring the RAWs Back on the shoot's Finish page first.
+line reaches the app it names Bring Back from iCloud on the shoot's Finish page first.
 
 **The library's Storage page is a way into each panel.** It lists every shoot with its glyph, what
 it holds on this disk (the engine's `storage.bytes_here_text` on each `/api/shoots` row) and the
@@ -2807,7 +2809,7 @@ pages are the way in, and Advanced can show them again.
   stops refusing." — the storage panel's sentence under its own lock, word for word, where the two
   had said it two ways. "Copy new shoots to iCloud" is gone: nothing read it, so he could turn it on
   and believe each night's card was backed up while nothing was, and nothing uploads by itself. A
-  copy up is his press of Copy the RAWs to iCloud, which works the night of the shoot (§2.8). The "Archived
+  copy up is his press of Copy to iCloud, which works the night of the shoot (§2.8). The "Archived
   copies go to" row is gone: its Choose… saved nothing and nothing read it, under "Not set. The
   engine uses its own default." It comes back when the engine takes a destination from the app.
 - **Learning** — "Learn from finished shoots automatically" (on); "Only when the Mac is idle" (on);
@@ -3017,8 +3019,8 @@ is reached with ⌘] or a click)* · — · Next Step ⌘] · Previous Step ⌘[
 
 **Shoot** — Cull It ⌘R · Cull Again… · — · Write the Presets · Open My Keepers in PhotoLab ⇧⌘E ·
 Cut a Reel · — · Finish This Shoot · — · Stop What Is Running ⌘. · — · Storage ▸ (Copy the RAWs to
-iCloud… · Bring the RAWs Back… · Check Every Original · Take Back the Cache… · — ·
-Remove the Local RAWs… · Let Go of the RAWs in iCloud…)
+iCloud… · Bring Back from iCloud… · Check Every Original · Take Back the Cache… · — ·
+Remove from This Mac… · Let Go of the RAWs in iCloud…)
 
 **Window** — Minimize ⌘M · Zoom · Fill · Center · — · Activity ⌥⌘L · — · First Edit ·
 Bring All to Front

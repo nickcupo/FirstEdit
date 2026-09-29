@@ -1256,7 +1256,7 @@ def groups_of(shoot: Path) -> tuple[list[tuple[str, list[Path], str | None]], li
     groups: dict[str, list[Path]] = {}
     for p in frames:
         if not archive.local(p):
-            skipped.append((p.name, "in iCloud and not on this Mac; Bring the RAWs Back first"))
+            skipped.append((p.name, "in iCloud and not on this Mac; Bring Back from iCloud first"))
             continue
         gid = f"burst-{burst[p.stem]}" if p.stem in burst else f"frame-{p.stem}"
         groups.setdefault(gid, []).append(p)
@@ -1281,20 +1281,25 @@ def _count(n: int, one: str) -> str:
     return f"{n} {one if n == 1 else one + 's'}"
 
 
-def pack_shoot(shoot: Path, apply: bool, log=print) -> int:
+def pack_shoot(shoot: Path, apply: bool, log=print, only: set[str] | None = None) -> int:
     """Every RAW of a shoot: each burst into packed/burst-<n>.fbp beside raw/,
     and each frame in no burst into packed/frame-<name>.fbp.
 
     Without apply it only says what it would pack, and names every frame it
     would not, which is what the Finish page's list shows before he confirms.
     It removes nothing either way: the RAWs stay where they are, and a group
-    already packed is left alone."""
+    already packed is left alone. `only` narrows it to the groups holding any
+    of those frame names, which is how a copy to iCloud packs just what it is
+    about to send."""
     sys.path.insert(0, str(_here()))
     import library  # noqa: E402
     from common import human  # noqa: E402
     where = library.paths(Path(shoot).expanduser().resolve())
     dest = where.shoot / PACKED
     groups, skipped = groups_of(where.shoot)
+    if only is not None:
+        groups = [g for g in groups if any(p.name in only for p in g[1])]
+        skipped = [x for x in skipped if x[0] in only]
     todo = [(gid, files, key) for gid, files, key in groups if not (dest / f"{gid}.fbp").exists()]
     packed = sum(len(f) for g, f, _ in groups if (dest / f"{g}.fbp").exists())
     nf = sum(len(f) for _, f, _ in todo)

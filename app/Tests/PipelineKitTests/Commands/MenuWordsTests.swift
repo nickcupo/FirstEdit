@@ -14,7 +14,7 @@ struct MenuWordsTests {
         #expect(CommandTable.titleCase("Copy the card") == "Copy the Card")
         #expect(CommandTable.titleCase("Choose keepers") == "Choose Keepers")
         #expect(CommandTable.titleCase("Edit in PhotoLab") == "Edit in PhotoLab")
-        #expect(CommandTable.titleCase("Copy the RAWs to iCloud") == "Copy the RAWs to iCloud")
+        #expect(CommandTable.titleCase("Copy to iCloud") == "Copy to iCloud")
         #expect(CommandTable.titleCase("Done") == "Done")
         let why = CommandTable.command(CommandTable.ID.whyItIsOut)?.children.map(\.title) ?? []
         #expect(why.allSatisfy { $0 == CommandTable.titleCase($0) }, "\(why)")

@@ -231,10 +231,10 @@ public enum Words {
         public static var stopJob: String { s("command.stopJob", "Stop What Is Running", "Menu item, ⌘.") }
         public static var storage: String { s("command.storage", "Storage", "A submenu.") }
         public static var copyUp: String {
-            s("command.copyUp", "Copy the RAWs to iCloud…", "Storage submenu.")
+            s("command.copyUp", "Copy to iCloud…", "Storage submenu.")
         }
         public static var bringBack: String {
-            s("command.bringBack", "Bring the RAWs Back…", "Storage submenu.")
+            s("command.bringBack", "Bring Back from iCloud…", "Storage submenu.")
         }
         public static var checkEvery: String {
             s("command.checkEvery", "Check Every Original", "Storage submenu.")
@@ -243,7 +243,7 @@ public enum Words {
             s("command.takeBackCache", "Take Back the Cache…", "Storage submenu.")
         }
         public static var removeLocal: String {
-            s("command.removeLocal", "Remove the Local RAWs…",
+            s("command.removeLocal", "Remove from This Mac…",
               "Storage submenu, in its own section at the bottom. Removes a copy, keeps a checked one.")
         }
         public static var letGo: String {

@@ -60,7 +60,7 @@ final class StorageLearningScenes: SceneProvider {
                     storage: f.decode(Storage.self, "StorageLearning/storage-both"),
                     ended: .init(title: "copying the RAWs of 2026-09-13-dog to iCloud", outcome: .done,
                                  line: "54 copied and verified, 0 failed. iCloud still has to upload them, "
-                                     + "and Remove the Local RAWs takes none until it has.")))
+                                     + "and Remove from This Mac takes none until it has.")))
             },
             scene("storage-library", 900, 700) { f in
                 LibraryStorage(app: f.makeApp(selection: .storage),

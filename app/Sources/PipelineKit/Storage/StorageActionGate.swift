@@ -5,8 +5,8 @@ import Foundation
 /// disabled and the reason beside it, never a disabled button with no reason).
 ///
 /// On a finished shoot that had never been archived — his commonest case —
-/// Bring the RAWs Back, Remove the Local RAWs and Let Go of the RAWs in iCloud
-/// all looked as live as Copy the RAWs to iCloud, and each one started a dry
+/// Bring Back from iCloud, Remove from This Mac and Let Go of the RAWs in iCloud
+/// all looked as live as Copy to iCloud, and each one started a dry
 /// run, waited, and came back with one line: "has no archive manifest". Every
 /// figure this reads is one `GET /api/storage` already carries; nothing here
 /// works out a count of its own.
@@ -27,10 +27,11 @@ struct StorageActionGate: Equatable {
             if a.pullable == 0 {
                 return a.up == 0 ? Strings.Storage.nothingInICloud : Strings.Storage.pullNothing
             }
-        case .pack:
-            // Packing reads the RAWs, so it needs them here. Which bursts are
-            // left to pack is the engine's list, drawn when he presses it.
-            if a.here == 0 { return Strings.Storage.packNothingHere }
+        case .trim:
+            // A copy up there goes only when this Mac has the RAWs, the same
+            // bytes; which ones do is the engine's list, drawn on the press.
+            if a.raw_up + a.packed_up == 0 { return Strings.Storage.nothingInICloud }
+            if a.here == 0 { return Strings.Storage.trimNothingHere }
         case .reclaim:
             // The engine's own refusals are listed in the cache group above
             // the buttons, under a heading that says they are why; this
@@ -38,7 +39,9 @@ struct StorageActionGate: Equatable {
             if !storage.cache.refusals.isEmpty { return Strings.Storage.reclaimRefused }
             if storage.cache.files == 0 { return Strings.Storage.reclaimNothing }
         case .drop:
-            if a.droppable == 0 {
+            // The shoot's own packed bursts go too once the same file is up,
+            // so there can be something to free with no RAW left to remove.
+            if a.droppable == 0 && !(a.packed_here > 0 && a.packed_up > 0) {
                 if a.here == 0 && a.here_evicted == 0 { return Strings.Storage.dropNothingHere }
                 return a.up == 0 ? Strings.Storage.dropNothingUp : Strings.Storage.dropNothingChecked
             }
@@ -62,7 +65,7 @@ struct StorageActionGate: Equatable {
         case .pull: text = storage.archive.pullable_text
         case .drop: text = storage.archive.droppable_text
         case .reclaim: text = storage.cache.bytes_text
-        case .expire, .pack: text = ""
+        case .expire, .trim: text = ""
         }
         return reason(action) == nil && text != "0 B" ? text : ""
     }

@@ -29,14 +29,14 @@ public struct StoragePanel: View {
     /// take nothing away: they are planned like everything else, and they are
     /// not on the ladder, so they carry none of its weight.
     enum PanelAction: String, Identifiable, Hashable {
-        case push, pull, pack, reclaim, drop, expire
+        case push, pull, reclaim, drop, trim, expire
         var id: String { rawValue }
         var what: String { rawValue }
 
         var rung: Rung? {
             switch self {
-            case .push, .pull, .pack: return nil
-            case .reclaim, .drop: return .removesACopy
+            case .push, .pull: return nil
+            case .reclaim, .drop, .trim: return .removesACopy
             case .expire: return .deletesPhotographs
             }
         }
@@ -226,16 +226,17 @@ public struct StoragePanel: View {
                     .help(model.isFollowing ? Strings.Storage.waitForTheJob : "")
                     actionButton(.reclaim, Strings.Storage.reclaim)
                 }
-                // Burstpack: every burst into one lossless file beside raw/.
-                // It takes nothing away, so it sits with the copies.
-                GridRow {
-                    actionButton(.pack, Strings.Storage.pack)
-                    Button(Strings.Storage.checkPacked) {
-                        Task { _ = await model.checkPackedBursts() }
+                // Only once there is something packed to check: a packed
+                // burst is made by Copy to iCloud, when he chooses Packed.
+                if (model.storage?.archive.packed_here ?? 0) > 0 {
+                    GridRow {
+                        Button(Strings.Storage.checkPacked) {
+                            Task { _ = await model.checkPackedBursts() }
+                        }
+                        .disabled(model.isFollowing)
+                        .help(model.isFollowing ? Strings.Storage.waitForTheJob : Strings.Storage.checkPackedHelp)
+                        .accessibilityIdentifier("storage.checkPacked")
                     }
-                    .disabled(model.isFollowing)
-                    .help(model.isFollowing ? Strings.Storage.waitForTheJob : Strings.Storage.checkPackedHelp)
-                    .accessibilityIdentifier("storage.checkPacked")
                 }
             }
             .buttonStyle(.bordered)
@@ -243,7 +244,7 @@ public struct StoragePanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("storage.frequent")
             reasons([(.push, Strings.Storage.push), (.pull, Strings.Storage.pull),
-                     (.reclaim, Strings.Storage.reclaim), (.pack, Strings.Storage.pack)])
+                     (.reclaim, Strings.Storage.reclaim)])
         }
     }
 
@@ -331,13 +332,24 @@ public struct StoragePanel: View {
             // engine's own list first, which is what the ellipsis says. The
             // red is on the button inside that sheet, where the consequence
             // is written out.
-            HStack(spacing: Tokens.Metric.groupGap) {
-                actionButton(.drop, Strings.Storage.drop)
-                actionButton(.expire, Strings.Storage.expire)
-                Spacer(minLength: 0)
+            // Two rows, as above: the three side by side, with a size on
+            // the first, are wider than the column. The two that each remove
+            // one copy while another is kept share the first row; the one
+            // that can leave a frame with none has the second to itself.
+            Grid(alignment: .leading, horizontalSpacing: Tokens.Metric.groupGap,
+                 verticalSpacing: Tokens.Metric.relatedGap) {
+                GridRow {
+                    actionButton(.drop, Strings.Storage.drop)
+                    actionButton(.trim, Strings.Storage.trim)
+                }
+                GridRow {
+                    actionButton(.expire, Strings.Storage.expire)
+                }
             }
             .buttonStyle(.bordered)
-            reasons([(.drop, Strings.Storage.drop), (.expire, Strings.Storage.expire)])
+            .frame(maxWidth: .infinity, alignment: .leading)
+            reasons([(.drop, Strings.Storage.drop), (.trim, Strings.Storage.trim),
+                     (.expire, Strings.Storage.expire)])
             Text(Strings.Storage.neverDeletesFolder)
                 .font(.footnote)
                 .foregroundStyle(.secondary)

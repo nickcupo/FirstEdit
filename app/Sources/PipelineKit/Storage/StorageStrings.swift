@@ -28,19 +28,44 @@ extension Strings {
         // MARK: the frequent actions, first and together
 
         public static var push: String {
-            s("storage.push", "Copy the RAWs to iCloud…",
+            s("storage.push", "Copy to iCloud…",
               "A frequent action. The ellipsis is the plan sheet, as in Shoot ▸ Storage.")
         }
         public static var pull: String {
-            s("storage.pull", "Bring the RAWs Back…",
+            s("storage.pull", "Bring Back from iCloud…",
               "A frequent action. The ellipsis is the plan sheet, as in Shoot ▸ Storage.")
         }
-        public static var pack: String {
-            s("storage.pack", "Pack Bursts…",
-              "A frequent action: each burst kept as its keeper and how the rest differ, losslessly, in packed/. The ellipsis is the plan sheet.")
+        // MARK: which form
+
+        public static var formPush: String {
+            s("storage.formPush", "Copy them as", "The label of the choice on Copy to iCloud's sheet.")
+        }
+        public static var asRAW: String {
+            s("storage.asRAW", "RAW files", "Copy to iCloud's choice: the ARWs as they are.")
+        }
+        public static var asPacked: String {
+            s("storage.asPacked", "Packed, about half the size",
+              "Copy to iCloud's choice: each burst packed losslessly into one file first.")
+        }
+        public static var formPushNote: String {
+            s("storage.formPushNote",
+              "Packed keeps every byte: each burst is stored as the frame you kept and how the others differ, and every frame is unpacked and checked against its RAW before anything is copied. Bring Back from iCloud unpacks them.",
+              "Under the choice on Copy to iCloud's sheet.")
+        }
+        public static var formTrim: String {
+            s("storage.formTrim", "Remove", "The label of the choice on Remove Copies from iCloud's sheet.")
+        }
+        public static var rawCopies: String {
+            s("storage.rawCopies", "RAW copies", "Remove Copies from iCloud's choice.")
+        }
+        public static var packedCopies: String {
+            s("storage.packedCopies", "Packed copies", "Remove Copies from iCloud's choice.")
+        }
+        public static var bothCopies: String {
+            s("storage.bothCopies", "Both", "Remove Copies from iCloud's choice.")
         }
         /// An action's name with the engine's own figure for what it would
-        /// carry: "Copy the RAWs to iCloud (36.3 GB)…".
+        /// carry: "Copy to iCloud (36.3 GB)…".
         public static func sized(_ name: String, _ size: String) -> String {
             guard !size.isEmpty else { return name }
             let bare = name.hasSuffix("…") ? String(name.dropLast()) : name
@@ -55,15 +80,15 @@ extension Strings {
 
         public static var dropNotFinished: String {
             s("storage.dropNotFinished", "This shoot is not finished yet, so its RAWs are still going to be read. Press Finish This Shoot first.",
-              "Why Remove the Local RAWs is off on a shoot copied to iCloud before it was finished.")
+              "Why Remove from This Mac is off on a shoot copied to iCloud before it was finished.")
         }
         public static var pushNothing: String {
             s("storage.pushNothing", "Nothing on this Mac is waiting to be copied to iCloud.",
-              "Why Copy the RAWs to iCloud is off.")
+              "Why Copy to iCloud is off.")
         }
         public static var nothingInICloud: String {
             s("storage.nothingInICloud", "Nothing of this shoot is in iCloud.",
-              "Why Bring the RAWs Back or Let Go is off.")
+              "Why Bring Back from iCloud or Let Go is off.")
         }
         public static var checkPacked: String {
             s("storage.checkPacked", "Check the Packed Bursts",
@@ -74,13 +99,13 @@ extension Strings {
               "Unpacks every packed burst in memory and checks each frame against its checksum and the RAW on this Mac. Nothing is written.",
               "The help tag of Check the Packed Bursts.")
         }
-        public static var packNothingHere: String {
-            s("storage.packNothingHere", "None of this shoot's RAWs are on this Mac to pack.",
-              "Why Pack Bursts is off.")
+        public static var trimNothingHere: String {
+            s("storage.trimNothingHere", "None of its RAWs are on this Mac, so every copy in iCloud is still needed.",
+              "Why Remove Copies from iCloud is off.")
         }
         public static var pullNothing: String {
             s("storage.pullNothing", "Every RAW of this shoot in iCloud is already on this Mac.",
-              "Why Bring the RAWs Back is off.")
+              "Why Bring Back from iCloud is off.")
         }
         public static var reclaimRefused: String {
             s("storage.reclaimRefused", "It will not run on this shoot, for the reasons listed above.",
@@ -90,14 +115,14 @@ extension Strings {
             s("storage.reclaimNothing", "Nothing here can be taken back.", "Why the cache button is off.")
         }
         public static var dropNothingHere: String {
-            s("storage.dropNothingHere", "None of its RAWs are on this Mac.", "Why Remove the Local RAWs is off.")
+            s("storage.dropNothingHere", "None of its RAWs are on this Mac.", "Why Remove from This Mac is off.")
         }
         public static var dropNothingUp: String {
-            s("storage.dropNothingUp", "Nothing here has a copy in iCloud yet.", "Why Remove the Local RAWs is off.")
+            s("storage.dropNothingUp", "Nothing here has a copy in iCloud yet.", "Why Remove from This Mac is off.")
         }
         public static var dropNothingChecked: String {
             s("storage.dropNothingChecked", "Nothing here has a checked copy in iCloud yet.",
-              "Why Remove the Local RAWs is off.")
+              "Why Remove from This Mac is off.")
         }
         public static var expireNotFinished: String {
             s("storage.expireNotFinished", "This shoot is not finished, so nothing in it has started to age.",
@@ -175,7 +200,11 @@ extension Strings {
               "The header of the group that is kept away from the frequent buttons.")
         }
         public static var drop: String {
-            s("storage.drop", "Remove the Local RAWs…", "Removes a copy and keeps a checked one.")
+            s("storage.drop", "Remove from This Mac…", "Removes a copy and keeps a checked one.")
+        }
+        public static var trim: String {
+            s("storage.trim", "Remove Copies from iCloud…",
+              "Removes copies in iCloud whose RAWs are on this Mac, the same bytes. Keeps every frame.")
         }
         public static var expire: String {
             // "Archived" was a third word for iCloud on a panel that says
@@ -197,13 +226,13 @@ extension Strings {
             switch what {
             case "push":
                 return s("storage.planTitle.push", "This is what would be copied to iCloud",
-                         "The plan sheet's title for Copy the RAWs to iCloud.")
+                         "The plan sheet's title for Copy to iCloud.")
             case "pull":
                 return s("storage.planTitle.pull", "This is what would be brought back",
-                         "The plan sheet's title for Bring the RAWs Back.")
-            case "pack":
-                return s("storage.planTitle.pack", "These bursts would be packed",
-                         "The plan sheet's title for Pack Bursts.")
+                         "The plan sheet's title for Bring Back from iCloud.")
+            case "trim":
+                return s("storage.planTitle.trim", "These copies in iCloud would go; this Mac keeps every frame",
+                         "The plan sheet's title for Remove Copies from iCloud.")
             default:
                 return s("storage.planTitle", "This is what would go", "The plan sheet's title.")
             }

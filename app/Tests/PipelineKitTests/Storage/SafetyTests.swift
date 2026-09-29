@@ -160,7 +160,7 @@ struct SafetyTests {
         for (name, text) in Self.sources {
             guard let r = text.range(of: ".toolbar {") else { continue }
             let toolbar = String(text[r.lowerBound...].prefix(1200))
-            for word in ["Strings.Storage.drop", "Strings.Storage.expire",
+            for word in ["Strings.Storage.drop", "Strings.Storage.trim", "Strings.Storage.expire",
                          "Strings.Learning.useItAnyway"] {
                 #expect(!toolbar.contains(word), "\(name) has \(word) in a toolbar")
             }
@@ -170,7 +170,9 @@ struct SafetyTests {
     @Test("the label of anything that opens a plan ends in an ellipsis")
     func theEllipsisIsThePromise() {
         #expect(Strings.Storage.drop.hasSuffix("…"))
+        #expect(Strings.Storage.trim.hasSuffix("…"))
         #expect(Strings.Storage.expire.hasSuffix("…"))
+        #expect(!Strings.Storage.checkPacked.hasSuffix("…"), "reading and comparing needs no plan")
         #expect(Strings.Storage.reclaim.hasSuffix("…"))
         #expect(Strings.Learning.useItAnyway.hasSuffix("…"))
         // These two take nothing away and are not on the ladder, but they are
@@ -179,7 +181,7 @@ struct SafetyTests {
         #expect(Strings.Storage.pull.hasSuffix("…"))
         #expect(!Strings.Storage.check.hasSuffix("…"), "reading and comparing needs no plan")
         // And a figure on the label keeps the promise at the end of it.
-        #expect(Strings.Storage.sized(Strings.Storage.push, "36.3 GB") == "Copy the RAWs to iCloud (36.3 GB)…")
+        #expect(Strings.Storage.sized(Strings.Storage.push, "36.3 GB") == "Copy to iCloud (36.3 GB)…")
     }
 
     @Test("no retired word is in a string this crew puts on screen")

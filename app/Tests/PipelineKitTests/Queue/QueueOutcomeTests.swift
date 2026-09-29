@@ -74,7 +74,7 @@ struct QueueOutcomeTests {
         #expect(c.title == "1 failed, 1 skipped, 1 stopped, 2 done")
         let lines = c.body.split(separator: "\n").map(String.init)
         #expect(lines.first == Strings.Queue.failedLine("Cull · 2026-09-19"))
-        #expect(lines.contains(Strings.Queue.skippedLine("Copy the RAWs to iCloud · 2026-09-19")))
+        #expect(lines.contains(Strings.Queue.skippedLine("Copy to iCloud · 2026-09-19")))
         #expect(lines.contains(Strings.Queue.stoppedLine("\(Strings.Queue.what("gather")!) · 2026-09-13-dog")))
         #expect(lines.contains("Copy the Card · 2026-09-19"))
         // The skipped reason lives in the window, not in a truncated banner.
