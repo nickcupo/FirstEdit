@@ -2,11 +2,11 @@
 """
 burstpack.py - a burst of RAWs kept as one frame and how the others differ.
 
-    ./pl burstpack pack <out.fbp> <raw>... [--key NAME]   pack a burst, then prove it unpacks
-    ./pl burstpack unpack <archive.fbp> <dir> [NAME...]   put the RAWs back, byte for byte
+    ./pl burstpack pack <out.roll> <raw>... [--key NAME]   pack a burst, then prove it unpacks
+    ./pl burstpack unpack <archive.roll> <dir> [NAME...]   put the RAWs back, byte for byte
     ./pl burstpack export <shoot> <dir>                   every packed burst of a shoot, as RAWs, into <dir>
-    ./pl burstpack verify <archive.fbp>                   unpack in memory and check every checksum
-    ./pl burstpack list <archive.fbp>                     what is inside, and what each frame cost
+    ./pl burstpack verify <archive.roll>                   unpack in memory and check every checksum
+    ./pl burstpack list <archive.roll>                     what is inside, and what each frame cost
     ./pl burstpack shoot <shoot> [--apply]                every burst into <shoot>/packed/; the Finish page's Pack Bursts
     ./pl burstpack bench <shoot> [--bursts N]             what it would save on a shoot. Writes nothing
 
@@ -89,6 +89,9 @@ from pathlib import Path
 import numpy as np
 
 MAGIC = b"FEBURST\x01"
+# A roll: one burst, as a roll of film holds one run of frames. The name is
+# only the name; what a file is is the MAGIC at its head.
+EXT = ".roll"
 VERSION = 1
 
 # ------------------------------------------------------------------- rANS
@@ -1232,27 +1235,15 @@ def groups_of(shoot: Path) -> tuple[list[tuple[str, list[Path], str | None]], li
     frame. Only frames whose bytes are on this Mac are packed: an evicted RAW
     would be read back over the network, and it is listed as left out, with
     why, so the count he is shown adds up to the count he shot."""
-    import csv
     sys.path.insert(0, str(_here()))
     import archive  # noqa: E402
     import library  # noqa: E402
-    from common import RAW_EXTS, decision_path  # noqa: E402
+    from common import RAW_EXTS  # noqa: E402
     where = library.paths(Path(shoot).expanduser().resolve())
     raw = library.raw_dir(where.shoot)
     frames = sorted(p for p in raw.iterdir()
                     if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in RAW_EXTS)
-    burst: dict[str, str] = {}
-    when: dict[str, str] = {}
-    csv_path = where.cull / "cull.csv"
-    if csv_path.exists():
-        with csv_path.open() as fh:
-            for r in csv.DictReader(fh):
-                stem = Path(r["file"]).stem
-                when[stem] = r.get("shot_at", "")
-                if r.get("burst") not in (None, ""):
-                    burst[stem] = r["burst"]
-    sel = decision_path(where.cull, "selects.json")
-    kept = {Path(n).stem for n in json.loads(sel.read_text())} if sel.exists() else set()
+    burst, when, kept = _cull_facts(where)
     skipped: list[tuple[str, str]] = []
     groups: dict[str, list[Path]] = {}
     for p in frames:
@@ -1270,6 +1261,44 @@ def groups_of(shoot: Path) -> tuple[list[tuple[str, list[Path], str | None]], li
     return out, skipped
 
 
+def _cull_facts(where) -> tuple[dict[str, str], dict[str, str], set[str]]:
+    """(stem -> burst, stem -> when shot, the stems he kept), from the cull."""
+    import csv
+    from common import decision_path  # noqa: E402
+    burst: dict[str, str] = {}
+    when: dict[str, str] = {}
+    csv_path = where.cull / "cull.csv"
+    if csv_path.exists():
+        with csv_path.open() as fh:
+            for r in csv.DictReader(fh):
+                stem = Path(r["file"]).stem
+                when[stem] = r.get("shot_at", "")
+                if r.get("burst") not in (None, ""):
+                    burst[stem] = r["burst"]
+    sel = decision_path(where.cull, "selects.json")
+    kept = {Path(n).stem for n in json.loads(sel.read_text())} if sel.exists() else set()
+    return burst, when, kept
+
+
+def group_names(shoot: Path, names: set[str]) -> list[tuple[str, list[str], str | None]]:
+    """Frame names grouped the way groups_of groups files, for frames that need
+    not be on this Mac: a burst as the cull made it, else a group of one."""
+    sys.path.insert(0, str(_here()))
+    import library  # noqa: E402
+    where = library.paths(Path(shoot).expanduser().resolve())
+    burst, when, kept = _cull_facts(where)
+    groups: dict[str, list[str]] = {}
+    for n in sorted(names):
+        stem = Path(n).stem
+        groups.setdefault(f"burst-{burst[stem]}" if stem in burst else f"frame-{stem}", []).append(n)
+    out = []
+    for gid, ns in groups.items():
+        ns.sort(key=lambda n: (when.get(Path(n).stem, ""), n))
+        out.append((gid, ns, next((n for n in ns if Path(n).stem in kept), None)))
+    out.sort(key=lambda g: (when.get(Path(g[1][0]).stem, ""), g[1][0]))
+    return out
+
+
 def bursts_of(shoot: Path) -> list[tuple[str, list[Path], str | None]]:
     """The groups of two or more: what `bench` measures a neighbour on."""
     return [g for g in groups_of(shoot)[0] if len(g[1]) >= 2]
@@ -1283,8 +1312,8 @@ def _count(n: int, one: str) -> str:
 
 
 def pack_shoot(shoot: Path, apply: bool, log=print, only: set[str] | None = None) -> int:
-    """Every RAW of a shoot: each burst into packed/burst-<n>.fbp beside raw/,
-    and each frame in no burst into packed/frame-<name>.fbp.
+    """Every RAW of a shoot: each burst into packed/burst-<n>.roll beside raw/,
+    and each frame in no burst into packed/frame-<name>.roll.
 
     Without apply it only says what it would pack, and names every frame it
     would not, which is what the Finish page's list shows before he confirms.
@@ -1301,8 +1330,8 @@ def pack_shoot(shoot: Path, apply: bool, log=print, only: set[str] | None = None
     if only is not None:
         groups = [g for g in groups if any(p.name in only for p in g[1])]
         skipped = [x for x in skipped if x[0] in only]
-    todo = [(gid, files, key) for gid, files, key in groups if not (dest / f"{gid}.fbp").exists()]
-    packed = sum(len(f) for g, f, _ in groups if (dest / f"{g}.fbp").exists())
+    todo = [(gid, files, key) for gid, files, key in groups if not (dest / f"{gid}{EXT}").exists()]
+    packed = sum(len(f) for g, f, _ in groups if (dest / f"{g}{EXT}").exists())
     nf = sum(len(f) for _, f, _ in todo)
     size = sum(p.stat().st_size for _, f, _ in todo for p in f)
     nb = sum(1 for _, f, _ in todo if len(f) > 1)
@@ -1336,7 +1365,7 @@ def pack_shoot(shoot: Path, apply: bool, log=print, only: set[str] | None = None
     before = after = 0
     # What a stopped run left: its own temp files, never anything else.
     if dest.is_dir():
-        for t in [*dest.glob(".burst-*.fbp.*.tmp"), *dest.glob(".frame-*.fbp.*.tmp")]:
+        for t in [*dest.glob(f".burst-*{EXT}.*.tmp"), *dest.glob(f".frame-*{EXT}.*.tmp")]:
             t.unlink(missing_ok=True)
     log(f"@@ pack 0 {nf}")
 
@@ -1357,7 +1386,7 @@ def pack_shoot(shoot: Path, apply: bool, log=print, only: set[str] | None = None
         log(f"  {bid}: {human(b)} -> {human(a)} ({a / b:.0%}), every frame unpacked and matched")
 
     # The biggest bursts first, so the last worker is not left with the longest one.
-    jobs = sorted(((gid, files, key, dest / f"{gid}.fbp") for gid, files, key in todo),
+    jobs = sorted(((gid, files, key, dest / f"{gid}{EXT}") for gid, files, key in todo),
                   key=lambda j: -sum(p.stat().st_size for p in j[1]))
     workers = _workers(len(jobs), max(p.stat().st_size for _, f, _ in todo for p in f))
     log(f"packing on {workers} {'core' if workers == 1 else 'cores'}"
@@ -1664,7 +1693,7 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory() as td:
             for i, (_, files, key) in enumerate(bursts):
                 print(f"burst {i + 1}: {len(files)} frames, {key or files[0].name} whole")
-                out = Path(td) / f"b{i}.fbp"
+                out = Path(td) / f"b{i}{EXT}"
                 m = pack(files, out, key)
                 n_in = sum(f["size"] for f in m["frames"])
                 n_xz = sum(len(lzma.compress(p.read_bytes(), preset=6)) for p in files)

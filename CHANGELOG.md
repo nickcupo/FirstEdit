@@ -21,6 +21,13 @@ which asks where (on this Mac, or in iCloud) and removes one copy only where
 another is checked, and Let Go of the RAWs in iCloud. Letting go no longer
 rewrites the archive record from its ARW entries alone.
 
+RAW files already in iCloud can be packed where they are: Free Up Space ▸
+Pack in iCloud packs them, and lets each ARW copy go only once its packed
+copy is up and gives it back exactly. Packed bursts are `.roll` files.
+
+The Presets page counts the keepers you have just marked. It showed the
+count from when the shoot was opened until the presets had been written.
+
 The codec's inner loop is C (`pipeline/burstcore.c`), built into the app and
 checked to write exactly the bytes the numpy code does; bursts pack on three
 quarters of the cores.

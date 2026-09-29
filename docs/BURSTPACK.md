@@ -1,22 +1,25 @@
 # Burstpack
 
+Packed bursts are `.roll` files: one burst, the way a roll of film holds one
+run of frames.
+
 A burst's RAWs kept as the keeper and how the others differ. Lossless: what
 `unpack` writes is the file that was packed, every byte, with its modified
 time. It ships with the engine like every other module in `pipeline/`.
 
 On Finish, **Back Up to iCloud…** asks which form: *RAW files*, or *Packed,
 about half the size*. Packed packs each burst the copy is about to send into
-`packed/burst-<n>.fbp` in the shoot (a frame in no burst into
-`packed/frame-<name>.fbp`), checks it, and sends those files instead of the
+`packed/burst-<n>.roll` in the shoot (a frame in no burst into
+`packed/frame-<name>.roll`), checks it, and sends those files instead of the
 ARWs. From a terminal:
 
     ./pl archive push <shoot> --as packed [--apply]      what Back Up to iCloud, Packed, does
     ./pl burstpack shoot <shoot> [--apply]               only the packing, into packed/
     ./pl burstpack bench <shoot> [--bursts N]             what it would save. Writes nothing
-    ./pl burstpack pack <out.fbp> <raw>... [--key NAME]   pack, then prove it unpacks
-    ./pl burstpack unpack <archive.fbp> <dir> [NAME...]   put the RAWs back; refuses to overwrite
-    ./pl burstpack verify <archive.fbp>                   unpack in memory, check every SHA-256
-    ./pl burstpack list <archive.fbp>                     what each frame cost
+    ./pl burstpack pack <out.roll> <raw>... [--key NAME]   pack, then prove it unpacks
+    ./pl burstpack unpack <archive.roll> <dir> [NAME...]   put the RAWs back; refuses to overwrite
+    ./pl burstpack verify <archive.roll>                   unpack in memory, check every SHA-256
+    ./pl burstpack list <archive.roll>                     what each frame cost
 
 `bench` groups frames by the cull's `burst` column, takes the frame you kept
 from each burst (`selects.json`) as the one stored whole, and skips any RAW
@@ -120,6 +123,13 @@ ARW (`archive.py`, "packed bursts"). On Finish's storage panel:
   file is up. *In iCloud* removes an ARW or packed copy up there only when
   this Mac holds every frame in it as its RAW, the same bytes (`archive.py
   trim`). Either way no frame is left without a checked copy.
+- **Free Up Space… ▸ Pack in iCloud** (`archive.py repack`) packs the RAW
+  files already up there: from the RAWs on this Mac when they are the same
+  bytes as the record, else from the ARWs in iCloud, each checked first. The
+  packed file is proved by unpacking, copied up and read back; then each ARW
+  copy goes only once its packed copy is uploaded, vouched for by iCloud and
+  unpacks to the ARW's recorded bytes. Until iCloud has uploaded a packed
+  copy its ARWs stay, and choosing it again lets them go.
 - **Let Go of the RAWs in iCloud…** never touches a packed burst, and keeps
   their record when it rewrites `archive.json` (it used to rewrite the file
   from its ARW records alone).

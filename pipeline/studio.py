@@ -289,6 +289,7 @@ STAGE_WORDS = {
     "checkpacked": ("checking the packed bursts", "frames"),
     "trim": ("removing copies from iCloud", "files"),
     "unpack": ("unpacking", "frames"),
+    "repack": ("packing the RAWs in iCloud", "frames"),
 }
 INGEST_WEIGHTS = {"copy": 70, "verify": 30}
 # By what was asked of the copy. Without a check there is no second stage, so
@@ -313,7 +314,7 @@ SETUP_WEIGHTS = {"clip": 100}
 UPDATE_WEIGHTS = {"download": 90, "stage": 10}
 # One stage each: a push is a push. Held as a dict per verb so the bar's
 # arithmetic below is the same for these as it is for a cull.
-STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack", "checkpacked", "trim", "unpack")}
+STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack", "checkpacked", "trim", "unpack", "repack")}
 # By kind, for the jobs that are one stage long and are not storage verbs. An
 # Instagram make was weighed against the cull's table, where "instagram" is
 # not a stage, and its bar sat at 0% until it ended. The planning pass is added
@@ -4013,7 +4014,7 @@ def library() -> dict:
 # page and the terminal could tell him two different stories about the same
 # shoot, and only one of them would be the one that runs.
 
-STOR_VERBS = ("push", "drop", "pull", "expire", "reclaim", "pack", "trim")
+STOR_VERBS = ("push", "drop", "pull", "expire", "reclaim", "pack", "trim", "repack")
 
 
 def _s(n: int, one: str, many: str = "") -> str:
@@ -4138,6 +4139,16 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
             label = (f"Remove {_s(counts['files'], 'spare copy', 'spare copies')} from iCloud "
                      f"({bytes_text}). Every one of these frames keeps its original in this shoot.")
         ready = ready and bool(counts.get("files"))
+    elif what == "repack":
+        m = re.search(r"^\s*would pack (\d+) frames in iCloud, (.+?), into packed bursts", text, re.M)
+        r = re.search(r"^\s*would remove (\d+) ARW copies from iCloud, (.+?), whose frame", text, re.M)
+        if m:
+            counts["frames"], bytes_text = int(m.group(1)), m.group(2)
+            label = f"Pack {_s(counts['frames'], 'frame')} in iCloud ({bytes_text})"
+        elif r:
+            counts["copies"], bytes_text = int(r.group(1)), r.group(2)
+            label = f"Remove {_s(counts['copies'], 'ARW copy', 'ARW copies')} from iCloud ({bytes_text})"
+        ready = ready and bool(counts.get("frames") or counts.get("copies"))
     elif what == "trim":
         m = re.search(r"^\s*would remove (\d+) files from iCloud, (.+?); every frame", text, re.M)
         if m:
@@ -4187,11 +4198,11 @@ def _stor_state(s: Shoot, what: str) -> str:
         keep = amod.keepers_of(s.folder)
         h.update(("|".join(sorted(keep)) if keep is not None else "?no key?").encode())
         h.update(f"|{amod.retention(s.folder)}|{amod.days_since_finished(s.folder)}\n".encode())
-    if what in ("pack", "push", "drop", "trim", "pull"):
+    if what in ("pack", "push", "drop", "trim", "pull", "repack"):
         # The packed bursts, here and on record up there: one packed since the
         # list was drawn, or one removed, changes what the run would do.
         packed = s.folder / "packed"
-        for p in sorted(packed.glob("*.fbp")) if packed.is_dir() else []:
+        for p in sorted(packed.glob("*.roll")) if packed.is_dir() else []:
             h.update(f"packed|{p.name}|{p.stat().st_size}\n".encode())
         rec = amod.load_manifest(s.folder).get("packed") or {}
         for name in sorted(rec):
@@ -4432,7 +4443,7 @@ def read_plan(s: Shoot, what: str, body: dict) -> dict:
 # one that says something true is put in the app's words. The commands print
 # what they print: this is the page's reading of it, and the list's token does
 # not depend on it.
-PLAN_DROP = ("nothing was removed. Add --apply", "nothing was copied. Add --apply")
+PLAN_DROP = ("nothing was removed. Add --apply", "nothing was copied. Add --apply", "nothing was changed. Add --apply")
 PLAN_WORDS = {
     "Those are left alone. Add --yes-delete-originals to include them.":
         'Those are left alone. Tick "Including the frames with no other copy" to include them.',
@@ -4504,7 +4515,8 @@ STOR_TITLES = {"push": "copying the RAWs of {n} to iCloud",
                "pack": "packing the bursts of {n}",
                "checkpacked": "checking the packed bursts of {n}",
                "trim": "removing copies of {n} from iCloud",
-               "unpack": "unpacking the bursts of {n}"}
+               "unpack": "unpacking the bursts of {n}",
+               "repack": "packing the RAWs of {n} in iCloud"}
 
 
 # ------------------------------------------ the list of work he asked for
@@ -4926,7 +4938,8 @@ PLAN_DOES = {"push": "Check what would be copied to iCloud, and show you what it
              "expire": "Check which RAWs in iCloud would be let go, and show you what it found.",
              "reclaim": "Check what cache would be taken back, and show you what it found.",
              "pack": "Check which bursts would be packed, and show you what it found.",
-             "trim": "Check which copies in iCloud could go, and show you what it found."}
+             "trim": "Check which copies in iCloud could go, and show you what it found.",
+             "repack": "Check which RAWs in iCloud could be packed, and show you what it found."}
 
 
 def _b_plan(what: str):
@@ -4963,6 +4976,7 @@ WORK: dict[str, object] = {
     "plan-reclaim": _b_plan("reclaim"),
     "plan-pack": _b_plan("pack"),
     "plan-trim": _b_plan("trim"),
+    "plan-repack": _b_plan("repack"),
 }
 
 # What may never be put on the list, and the sentence he is told instead.
@@ -4983,6 +4997,8 @@ NEVER_QUEUED = {
     "stor-expire": "Letting go of RAWs in iCloud is not something to leave on a list. Nothing on this "
                    "Mac would hold those photographs afterwards, and the count you typed has to be "
                    "the count of the list in front of you.",
+    "stor-repack": "Packing the RAWs in iCloud lets their ARW copies go, so it is not something to leave "
+                   "on a list. It runs against the list you read a moment before.",
     "stor-trim": "Removing copies from iCloud is not something to leave on a list. It runs against the "
                  "list you read a moment before, and a list an hour old is about a shoot nobody has "
                  "looked at since.",

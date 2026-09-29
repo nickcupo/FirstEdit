@@ -2350,8 +2350,10 @@ before they start (`archive.restore_for_work`), and stop rather than work on par
 packed burst in iCloud is a copy push, drop and pull all accept. Then a rule, 32 pt of space, and a
 group headed **Remove and delete** holding **Free Up Space…** and **Let Go of the RAWs in
 iCloud…**. Free Up Space's sheet asks where, *On this Mac* (drop: the RAWs whose copy up there is
-checked, and the shoot's packed bursts whose identical file is up) or *In iCloud* (trim: the copies
-up there, ARW or packed, whose RAWs are here, the same bytes), and is that engine list; each keeps a
+checked, and the shoot's packed bursts whose identical file is up), *In iCloud* (trim: the copies
+up there, ARW or packed, whose RAWs are here, the same bytes) or *Pack in iCloud* (repack: the RAW
+files up there packed, each ARW copy let go once its packed copy is up and gives it back), and is
+that engine list; each keeps a
 checked copy of every frame. Let Go is the one that can leave a frame with none — in the page the
 destructive control sat 12 px above the button he presses at the end of nearly every shoot
 (FLOW-06). The frame-by-frame table stays a lazy disclosure, fetched only on first expand.

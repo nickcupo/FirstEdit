@@ -130,6 +130,15 @@ public final class ShootSession {
     @ObservationIgnored private var markedWhenCounted: [String: Int] = [:]
     @ObservationIgnored private var seenWhenCounted: Set<String> = []
 
+    /// Whether he has marked a frame, or been through a burst or taken one
+    /// back, since the engine last counted the shoot. Its counts in `info` are
+    /// then a step behind him, and a page that prints them has to count for
+    /// itself until the engine is asked again.
+    public var markedSinceCounted: Bool {
+        if Set(bursts.filter(\.seen).map(\.id)) != seenWhenCounted { return true }
+        return rows.contains { stem, row in row.override != markedWhenCounted[stem] }
+    }
+
     /// Whether the engine's counts for a burst still describe it: no mark of
     /// his on its frames and not its record of being been through has changed
     /// since the engine counted. A burst he has worked on since has to be

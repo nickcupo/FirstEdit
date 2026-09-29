@@ -252,6 +252,10 @@ public struct PresetsStep: StepView {
             model.observeJobs(ext: nil)
             focusFirst = true
             Editors.look(for: model.editor)
+            // The engine's counts as they are now: the keepers he marked on
+            // the way here are in them. Until this lands the split is counted
+            // from his marks (AutomaticPresetSplit), so it is right either way.
+            try? await session.reload(ext: nil)
         }
         .onChange(of: model.editor) { _, id in Editors.look(for: id) }
         .onDisappear { model.stopObserving() }
