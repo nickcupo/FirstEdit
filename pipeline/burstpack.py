@@ -1222,67 +1222,107 @@ def unpack(archive: Path, dest: Path, names: list[str] | None = None, log=print)
 
 # --------------------------------------------------------------------- CLI
 
-def bursts_of(shoot: Path) -> list[tuple[str, list[Path], str | None]]:
-    """The shoot's bursts as the cull grouped them, frames in capture order, each
-    with the frame he kept from it if he kept one. Only frames whose bytes are
-    on this Mac: an evicted RAW would be read back over the network."""
+def groups_of(shoot: Path) -> tuple[list[tuple[str, list[Path], str | None]], list[tuple[str, str]]]:
+    """Every RAW in the shoot, grouped for packing, and every one that cannot be.
+
+    A group is a burst as the cull made it, frames in capture order, with the
+    frame he kept from it if he kept one, named burst-<n>; a frame the cull put
+    in no burst of its own, or never saw, is a group of one, named after the
+    frame. Only frames whose bytes are on this Mac are packed: an evicted RAW
+    would be read back over the network, and it is listed as left out, with
+    why, so the count he is shown adds up to the count he shot."""
     import csv
     sys.path.insert(0, str(_here()))
     import archive  # noqa: E402
     import library  # noqa: E402
-    from common import decision_path  # noqa: E402
+    from common import RAW_EXTS, decision_path  # noqa: E402
     where = library.paths(Path(shoot).expanduser().resolve())
+    raw = library.raw_dir(where.shoot)
+    frames = sorted(p for p in raw.iterdir()
+                    if p.is_file() and not p.name.startswith(".") and p.suffix.lower() in RAW_EXTS)
+    burst: dict[str, str] = {}
+    when: dict[str, str] = {}
     csv_path = where.cull / "cull.csv"
-    if not csv_path.exists():
-        return []
+    if csv_path.exists():
+        with csv_path.open() as fh:
+            for r in csv.DictReader(fh):
+                stem = Path(r["file"]).stem
+                when[stem] = r.get("shot_at", "")
+                if r.get("burst") not in (None, ""):
+                    burst[stem] = r["burst"]
     sel = decision_path(where.cull, "selects.json")
     kept = {Path(n).stem for n in json.loads(sel.read_text())} if sel.exists() else set()
-    groups: dict[str, list[tuple[str, str]]] = {}
-    with csv_path.open() as fh:
-        for r in csv.DictReader(fh):
-            if r.get("burst") not in (None, ""):
-                groups.setdefault(r["burst"], []).append((r.get("shot_at", ""), r["file"]))
+    skipped: list[tuple[str, str]] = []
+    groups: dict[str, list[Path]] = {}
+    for p in frames:
+        if not archive.local(p):
+            skipped.append((p.name, "in iCloud and not on this Mac; Bring the RAWs Back first"))
+            continue
+        gid = f"burst-{burst[p.stem]}" if p.stem in burst else f"frame-{p.stem}"
+        groups.setdefault(gid, []).append(p)
     out = []
-    for bid, rows in sorted(groups.items(), key=lambda kv: min(kv[1])):
-        files = []
-        for _, name in sorted(rows):
-            p = library.frame_raw(where.shoot, name)
-            if p is not None and p.suffix.lower() in (".arw",) and archive.local(p):
-                files.append(p)
-        if len(files) >= 2:
-            key = next((p.name for p in files if p.stem in kept), None)
-            out.append((bid, files, key))
-    return out
+    for gid, files in groups.items():
+        files.sort(key=lambda q: (when.get(q.stem, ""), q.name))
+        key = next((q.name for q in files if q.stem in kept), None)
+        out.append((gid, files, key))
+    out.sort(key=lambda g: (when.get(g[1][0].stem, ""), g[1][0].name))
+    return out, skipped
+
+
+def bursts_of(shoot: Path) -> list[tuple[str, list[Path], str | None]]:
+    """The groups of two or more: what `bench` measures a neighbour on."""
+    return [g for g in groups_of(shoot)[0] if len(g[1]) >= 2]
 
 
 PACKED = "packed"
 
 
-def pack_shoot(shoot: Path, apply: bool, log=print) -> int:
-    """Every burst of a shoot, each into packed/burst-<n>.fbp beside raw/.
+def _count(n: int, one: str) -> str:
+    return f"{n} {one if n == 1 else one + 's'}"
 
-    Without apply it only says what it would pack, which is what the Finish
-    page's list shows before he confirms. It removes nothing either way: the
-    RAWs stay where they are, and a burst already packed is left alone."""
+
+def pack_shoot(shoot: Path, apply: bool, log=print) -> int:
+    """Every RAW of a shoot: each burst into packed/burst-<n>.fbp beside raw/,
+    and each frame in no burst into packed/frame-<name>.fbp.
+
+    Without apply it only says what it would pack, and names every frame it
+    would not, which is what the Finish page's list shows before he confirms.
+    It removes nothing either way: the RAWs stay where they are, and a group
+    already packed is left alone."""
     sys.path.insert(0, str(_here()))
     import library  # noqa: E402
     from common import human  # noqa: E402
     where = library.paths(Path(shoot).expanduser().resolve())
     dest = where.shoot / PACKED
-    bursts = bursts_of(where.shoot)
-    todo = [(bid, files, key) for bid, files, key in bursts if not (dest / f"burst-{bid}.fbp").exists()]
+    groups, skipped = groups_of(where.shoot)
+    todo = [(gid, files, key) for gid, files, key in groups if not (dest / f"{gid}.fbp").exists()]
+    packed = sum(len(f) for g, f, _ in groups if (dest / f"{g}.fbp").exists())
     nf = sum(len(f) for _, f, _ in todo)
     size = sum(p.stat().st_size for _, f, _ in todo for p in f)
-    if not bursts:
-        log(f"{where.shoot.name} has no bursts of two or more RAWs on this Mac to pack.")
-        return 0
+    nb = sum(1 for _, f, _ in todo if len(f) > 1)
+    ns = len(todo) - nb
+
+    def left_out() -> None:
+        # Every frame of the shoot is accounted for: packed, to pack, or here.
+        if skipped:
+            log(f"{_count(len(skipped), 'frame')} will not be packed:")
+            for name, why in skipped:
+                log(f"  - {name}: {why}")
+        if packed:
+            log(f"{_count(packed, 'frame')} already packed, in {dest}")
+
     if not todo:
-        log(f"every burst of {where.shoot.name} is already packed, in {dest}")
+        log(f"nothing left to pack in {where.shoot.name}.")
+        left_out()
         return 0
     if not apply:
-        log(f"would pack {nf} frames in {len(todo)} bursts, {human(size)}, into {dest}")
-        for bid, files, key in todo:
-            log(f"  burst {bid}: {len(files)} frames, {key or files[0].name} kept whole")
+        log(f"would pack {nf} frames in {nb} bursts and {_count(ns, 'single frame')}, {human(size)}, into {dest}")
+        for gid, files, key in todo:
+            if len(files) > 1:
+                log(f"  {gid.replace('-', ' ')}: {len(files)} frames, {key or files[0].name} kept whole")
+        if ns:
+            log(f"  and {_count(ns, 'frame')} shot on {'its' if ns == 1 else 'their'} own, each packed alone")
+        left_out()
         log("Nothing is removed: the RAWs stay where they are. Each burst is unpacked and checked "
             "against every frame's checksum before it is kept.")
         return 0
@@ -1290,7 +1330,7 @@ def pack_shoot(shoot: Path, apply: bool, log=print) -> int:
     before = after = 0
     # What a stopped run left: its own temp files, never anything else.
     if dest.is_dir():
-        for t in dest.glob(".burst-*.fbp.*.tmp"):
+        for t in [*dest.glob(".burst-*.fbp.*.tmp"), *dest.glob(".frame-*.fbp.*.tmp")]:
             t.unlink(missing_ok=True)
     log(f"@@ pack 0 {nf}")
 
@@ -1305,13 +1345,13 @@ def pack_shoot(shoot: Path, apply: bool, log=print) -> int:
         nonlocal failed, before, after
         if err is not None:        # one burst's failure is said, and the rest go on
             failed += 1
-            log(f"  burst {bid}: not packed: {err}")
+            log(f"  {bid}: not packed: {err}")
             return
         before, after = before + b, after + a
-        log(f"  burst {bid}: {human(b)} -> {human(a)} ({a / b:.0%}), every frame unpacked and matched")
+        log(f"  {bid}: {human(b)} -> {human(a)} ({a / b:.0%}), every frame unpacked and matched")
 
     # The biggest bursts first, so the last worker is not left with the longest one.
-    jobs = sorted(((bid, files, key, dest / f"burst-{bid}.fbp") for bid, files, key in todo),
+    jobs = sorted(((gid, files, key, dest / f"{gid}.fbp") for gid, files, key in todo),
                   key=lambda j: -sum(p.stat().st_size for p in j[1]))
     workers = _workers(len(jobs), max(p.stat().st_size for _, f, _ in todo for p in f))
     log(f"packing on {workers} {'core' if workers == 1 else 'cores'}"
@@ -1323,8 +1363,12 @@ def pack_shoot(shoot: Path, apply: bool, log=print) -> int:
         _pack_parallel(jobs, workers, tick, ended)
     if before:
         log(f"packed {human(before)} of RAWs into {human(after)} ({after / before:.0%}), in {dest}")
+    if skipped:
+        log(f"{_count(len(skipped), 'frame')} not packed:")
+        for name, why in skipped:
+            log(f"  - {name}: {why}")
     if failed:
-        log(f"{failed} bursts could not be packed; their RAWs are untouched")
+        log(f"{failed} of the groups could not be packed; their RAWs are untouched")
         return 1
     return 0
 

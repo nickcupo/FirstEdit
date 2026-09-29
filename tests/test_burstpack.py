@@ -270,7 +270,7 @@ def test_finish_packs_every_burst_and_takes_nothing_away(tmp_path):
     raws = {p.name: p.read_bytes() for p in (shoot / "raw").iterdir()}
     said: list[str] = []
     assert bp.pack_shoot(shoot, apply=False, log=said.append) == 0
-    assert said[0].startswith("would pack 5 frames in 2 bursts, ")
+    assert said[0].startswith("would pack 5 frames in 2 bursts and 0 single frames, ")
     assert not (shoot / "packed").exists(), "the list writes nothing"
     said.clear()
     assert bp.pack_shoot(shoot, apply=True, log=said.append) == 0
@@ -285,7 +285,8 @@ def test_finish_packs_every_burst_and_takes_nothing_away(tmp_path):
     assert {p.name: p.read_bytes() for p in back.iterdir()} == raws
     said.clear()
     bp.pack_shoot(shoot, apply=False, log=said.append)
-    assert said[0].startswith("every burst of 2026-01-01-lake is already packed")
+    assert said[0] == "nothing left to pack in 2026-01-01-lake."
+    assert said[1].startswith("5 frames already packed")
 
 
 def test_the_finish_page_reads_the_list_the_command_printed(tmp_path):
@@ -295,10 +296,10 @@ def test_the_finish_page_reads_the_list_the_command_printed(tmp_path):
     bp.pack_shoot(shoot, apply=False, log=said.append)
     plan = studio._parse_plan("pack", "\n".join(said), {})
     assert plan["ready"] and plan["counts"]["frames"] == 5 and plan["counts"]["bursts"] == 2
-    assert plan["label"] == "Pack 2 bursts (5 frames)"
+    assert plan["label"].startswith("Pack 5 frames (") and plan["counts"]["singles"] == 0
     argv = studio._stor_argv(studio.Shoot(shoot), "pack", {}, apply=True)
     assert argv[-4:] == [str(Path(studio.HERE) / "burstpack.py"), "shoot", str(shoot), "--apply"]
-    empty = studio._parse_plan("pack", "every burst of x is already packed, in /x/packed", {})
+    empty = studio._parse_plan("pack", "nothing left to pack in x.", {})
     assert not empty["ready"] and not empty["label"]
 
 
@@ -365,3 +366,37 @@ def test_bursts_are_packed_side_by_side_to_the_same_bytes(tmp_path, monkeypatch)
     assert "@@ pack 5 5" in said, "every frame a worker packed is counted on the bar"
     for name in ("burst-0.fbp", "burst-1.fbp"):
         assert (one / "packed" / name).read_bytes() == (two / "packed" / name).read_bytes()
+
+
+def test_every_frame_is_packed_or_named(tmp_path, monkeypatch):
+    """857 shot and 850 packed, with nothing said about the other seven, is the
+    bug this is for: a frame in no burst, one the cull never saw, and one whose
+    bytes are only in iCloud are each accounted for."""
+    shoot = _shoot(tmp_path)
+    raw = shoot / "raw"
+    extra = _files(tmp_path / "more", _burst(3, seed=11), prefix="TSC9")
+    lone, unseen, evicted = (raw / p.name for p in extra)
+    for p, q in zip(extra, (lone, unseen, evicted)):
+        p.rename(q)
+    with (shoot / "cull" / "cull.csv").open("a") as fh:
+        fh.write(f"{lone.name},,2026:01:01 11:00:00\n{evicted.name},1,2026:01:01 10:00:09\n")
+    import archive
+    monkeypatch.setattr(archive, "local", lambda p: Path(p).name != evicted.name)
+    said: list[str] = []
+    bp.pack_shoot(shoot, apply=False, log=said.append)
+    assert said[0].startswith("would pack 7 frames in 2 bursts and 2 single frames, ")
+    assert "1 frame will not be packed:" in said
+    assert any(line.startswith(f"  - {evicted.name}: in iCloud") for line in said)
+    studio = pytest.importorskip("studio")
+    plan = studio._parse_plan("pack", "\n".join(said), {})
+    assert plan["counts"]["frames"] == 7 and plan["counts"]["singles"] == 2
+    assert any(evicted.name in r for r in plan["refusals"]), "the sheet names the frame it leaves out"
+    bp.pack_shoot(shoot, apply=True, log=lambda *_: None)
+    assert sorted(p.name for p in (shoot / "packed").iterdir()) == [
+        "burst-0.fbp", "burst-1.fbp", f"frame-{lone.stem}.fbp", f"frame-{unseen.stem}.fbp"]
+    back = tmp_path / "back"
+    for a in (shoot / "packed").iterdir():
+        bp.unpack(a, back, log=lambda *_: None)
+    assert sorted(p.name for p in back.iterdir()) == sorted(p.name for p in raw.iterdir() if p != evicted)
+    for p in back.iterdir():
+        assert p.read_bytes() == (raw / p.name).read_bytes()

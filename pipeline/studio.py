@@ -4114,10 +4114,11 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
                      f"({bytes_text}). Every one of these frames keeps its original in this shoot.")
         ready = ready and bool(counts.get("files"))
     elif what == "pack":
-        m = re.search(r"^\s*would pack (\d+) frames in (\d+) bursts, (.+?), into ", text, re.M)
+        m = re.search(r"^\s*would pack (\d+) frames in (\d+) bursts and (\d+) single frames?, (.+?), into ", text, re.M)
         if m:
-            counts["frames"], counts["bursts"], bytes_text = int(m.group(1)), int(m.group(2)), m.group(3)
-            label = f"Pack {_s(counts['bursts'], 'burst')} ({_s(counts['frames'], 'frame')})"
+            counts["frames"], counts["bursts"], counts["singles"] = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            bytes_text = m.group(4)
+            label = f"Pack {_s(counts['frames'], 'frame')} ({bytes_text})"
         ready = ready and counts.get("frames", 0) > 0
     elif what == "reclaim":
         m = re.search(r"^\s+(\d+) files\s+(\S+ \S+)\s+total\s*$", text, re.M)
