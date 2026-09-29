@@ -12,6 +12,7 @@
 #   reclaim  report|reclaim <shoot>|verify <shoot>   what every shoot costs, and the cache it is safe to delete
 #   migrate  [<shoot>] [--apply|--undo]        move your decisions out of the cache folder (dry run by default)
 #   archive  report|status|push|drop|pull|expire <shoot>   a shoot's RAWs in iCloud Drive: push copies any shoot's; drop waits for Finish
+#   burstpack pack|unpack|verify|list|bench   a burst as its keeper and how the rest differ, lossless; bench <shoot> writes nothing
 #   check [truth.json]                        the face judge against frames we settled by eye
 #   bench                                     the cull against every shoot you have already chosen from
 #   evaluate                                  every dataset with an answer key: recall, vetoes, ranking, blink, animals, faces
@@ -43,6 +44,7 @@ case "$cmd" in
   studio)   exec "$PY" "$HERE/pipeline/studio.py" "$@" ;;
   reclaim)  exec "$PY" "$HERE/pipeline/reclaim.py" "$@" ;;
   archive)  exec "$PY" "$HERE/pipeline/archive.py" "$@" ;;
+  burstpack) exec "$PY" "$HERE/pipeline/burstpack.py" "$@" ;;
   migrate)  exec "$PY" "$HERE/pipeline/migrate.py" "$@" ;;
   check)    exec "$PY" "$HERE/pipeline/check_faces.py" "$@" ;;
   bench)    exec "$PY" "$HERE/pipeline/bench.py" "$@" ;;
