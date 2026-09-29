@@ -4,6 +4,7 @@ burstpack.py - a burst of RAWs kept as one frame and how the others differ.
 
     ./pl burstpack pack <out.fbp> <raw>... [--key NAME]   pack a burst, then prove it unpacks
     ./pl burstpack unpack <archive.fbp> <dir> [NAME...]   put the RAWs back, byte for byte
+    ./pl burstpack export <shoot> <dir>                   every packed burst of a shoot, as RAWs, into <dir>
     ./pl burstpack verify <archive.fbp>                   unpack in memory and check every checksum
     ./pl burstpack list <archive.fbp>                     what is inside, and what each frame cost
     ./pl burstpack shoot <shoot> [--apply]                every burst into <shoot>/packed/; the Finish page's Pack Bursts
@@ -1503,6 +1504,94 @@ def check_shoot(shoot: Path, log=print) -> int:
     return 1 if bad else 0
 
 
+def export_shoot(shoot: Path, dest: Path, log=print) -> int:
+    """Every frame of a shoot's packed bursts, unpacked into `dest` as the RAW
+    it was, with its own name and time: the shoot's own packed/ first, then any
+    packed burst recorded in iCloud that is not here.
+
+    Nothing is written over. A file already in `dest` with a frame's name is
+    left alone: skipped when it is that frame, the same bytes, and named as
+    refused when it is not. Every frame is checked against the checksum it
+    was packed with before it is given its name."""
+    sys.path.insert(0, str(_here()))
+    import archive  # noqa: E402
+    import library  # noqa: E402
+    where = library.paths(Path(shoot).expanduser().resolve())
+    dest = Path(dest).expanduser()
+    sources: dict[str, Path] = {q.name: q for q in archive.local_packed(where.shoot)}
+    for file in archive.load_manifest(where.shoot).get("packed") or {}:
+        up = archive.packed_dest(where.shoot, file)
+        if file not in sources and up.exists():
+            sources[file] = up
+    if not sources:
+        log(f"{where.shoot.name} has no packed bursts, here or in iCloud.")
+        return 0
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        log(f"cannot make {dest}: {e}")
+        return 1
+    total = 0
+    for q in sources.values():
+        try:
+            total += len(read_manifest(q.read_bytes())[0]["frames"]) if archive.local(q) else 0
+        except (OSError, ValueError):
+            pass
+    wrote = same = refused = bad = done = 0
+    log(f"@@ unpack 0 {max(total, 1)}")
+    for file, q in sorted(sources.items()):
+        if not archive.local(q) and not archive.materialise(q):
+            bad += 1
+            log(f"  - {file}: iCloud did not hand it over")
+            continue
+        try:
+            raw = q.read_bytes()
+            manifest, _ = read_manifest(raw)
+            got = _unpack_bytes(raw)
+        except (OSError, ValueError) as e:
+            bad += 1
+            log(f"  - {file}: does not unpack: {e}")
+            continue
+        for f in manifest["frames"]:
+            name, data = f["name"], got.get(f["name"])
+            done += 1
+            target = dest / name
+            if data is None:
+                continue
+            if target.exists():
+                if target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == f["sha256"]:
+                    same += 1
+                else:
+                    refused += 1
+                    log(f"  - {name}: a different file of that name is already in {dest.name}; left alone")
+                continue
+            fd, tmp = tempfile.mkstemp(dir=dest, prefix=f".{name}.", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(data)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.utime(tmp, ns=(f["mtime_ns"], f["mtime_ns"]))
+                os.link(tmp, target)            # never over a name that appeared meanwhile
+                wrote += 1
+            except FileExistsError:
+                refused += 1
+                log(f"  - {name}: a file of that name appeared in {dest.name}; left alone")
+            finally:
+                Path(tmp).unlink(missing_ok=True)
+            log(f"@@ unpack {done} {max(total, done)}")
+        del got
+    said = f"{wrote} RAWs unpacked into {dest}, each checked against the checksum it was packed with."
+    if same:
+        said += f" {same} were there already."
+    if refused:
+        said += f" {refused} were not written, because a different file had the name."
+    if bad:
+        said += f" {bad} packed bursts could not be read."
+    log(said)
+    return 1 if (refused or bad) else 0
+
+
 def _here() -> Path:
     return Path(__file__).resolve().parent
 
@@ -1527,6 +1616,9 @@ def main(argv: list[str] | None = None) -> int:
     sh.add_argument("--apply", action="store_true")
     ck = sub.add_parser("check")
     ck.add_argument("shoot", type=Path)
+    ex = sub.add_parser("export")
+    ex.add_argument("shoot", type=Path)
+    ex.add_argument("dest", type=Path)
     b = sub.add_parser("bench")
     b.add_argument("shoot", type=Path)
     b.add_argument("--bursts", type=int, default=3)
@@ -1558,6 +1650,11 @@ def main(argv: list[str] | None = None) -> int:
         return pack_shoot(a.shoot, a.apply, log=lambda line: print(line, flush=True))
     elif a.cmd == "check":
         return check_shoot(a.shoot, log=lambda line: print(line, flush=True))
+    elif a.cmd == "export":
+        sys.path.insert(0, str(_here()))
+        from common import stop_cleanly_on_sigterm  # noqa: E402
+        stop_cleanly_on_sigterm()
+        return export_shoot(a.shoot, a.dest, log=lambda line: print(line, flush=True))
     elif a.cmd == "bench":
         bursts = bursts_of(a.shoot)[:a.bursts]
         if not bursts:

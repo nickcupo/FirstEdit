@@ -173,6 +173,7 @@ struct SafetyTests {
         #expect(Strings.Storage.trim.hasSuffix("…"))
         #expect(Strings.Storage.expire.hasSuffix("…"))
         #expect(!Strings.Storage.checkPacked.hasSuffix("…"), "reading and comparing needs no plan")
+        #expect(Strings.Storage.unpackToFolder.hasSuffix("…"), "a folder is asked for first")
         #expect(Strings.Storage.reclaim.hasSuffix("…"))
         #expect(Strings.Learning.useItAnyway.hasSuffix("…"))
         // These two take nothing away and are not on the ladder, but they are

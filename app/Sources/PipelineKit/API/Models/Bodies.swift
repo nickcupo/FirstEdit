@@ -132,6 +132,13 @@ public struct StorageCheckBody: Encodable, Sendable {
     }
 }
 
+/// Unpack a shoot's packed bursts, as RAWs, into a folder he chose.
+public struct UnpackBody: Encodable, Sendable {
+    public let name: String
+    public let dest: String
+    public init(name: String, dest: String) { self.name = name; self.dest = dest }
+}
+
 public struct PlanBody: Encodable, Sendable {
     public let name: String
     public let what: String

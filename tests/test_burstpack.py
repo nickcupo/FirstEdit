@@ -601,3 +601,26 @@ def test_the_sheets_read_the_forms_and_the_new_lists(tmp_path, monkeypatch, caps
     plan = studio._parse_plan("drop", capsys.readouterr().out, {})
     assert plan["ready"] and plan["counts"]["packed"] == 2
     assert plan["label"].startswith("Remove 5 originals and 2 packed bursts, and free ")
+
+
+def test_packed_bursts_unpack_into_any_folder_and_never_over_a_file(tmp_path, monkeypatch):
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    archive.push(shoot, apply=True, form="packed")
+    archive.drop(shoot, apply=True)
+    assert not list((shoot / "packed").iterdir()), "so these come out of iCloud"
+    out = tmp_path / "Desktop" / "lake RAWs"
+    said: list[str] = []
+    assert bp.export_shoot(shoot, out, log=said.append) == 0
+    assert said[-1].startswith("5 RAWs unpacked into ")
+    assert {p.name: p.read_bytes() for p in out.iterdir()} == raws
+    assert (out / "TSC01000.ARW").stat().st_mtime_ns == 1_700_000_000_000_000_000
+
+    (out / "TSC01001.ARW").write_bytes(b"his own")
+    (out / "TSC01002.ARW").unlink()
+    said.clear()
+    assert bp.export_shoot(shoot, out, log=said.append) == 1
+    assert "1 RAWs unpacked" in said[-1] and "3 were there already" in said[-1]
+    assert (out / "TSC01001.ARW").read_bytes() == b"his own", "a different file of that name is left alone"
+    assert (out / "TSC01002.ARW").read_bytes() == raws["TSC01002.ARW"]
+    assert not list(out.glob(".*.tmp"))

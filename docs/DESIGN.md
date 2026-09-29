@@ -2344,7 +2344,9 @@ The frequent actions come first: **Copy to iCloud…**, **Bring Back from iCloud
 Original**, **Take Back the Cache…**. Copy to iCloud's sheet asks the form, *RAW files* or
 *Packed, about half the size* (`burstpack.py`, docs/BURSTPACK.md), and a packed burst in iCloud is
 a copy push, drop and pull all accept. Once a shoot has packed bursts, **Check the Packed Bursts**
-sits on a row of its own; it unpacks each in memory, checks it, and reads only. Then a rule, 32 pt of space, and a group headed **Remove and
+sits on a row of its own with **Unpack to a Folder…**; the first unpacks each in memory, checks it,
+and reads only, the second writes every packed frame as its RAW into a folder he picks and never
+over a file. Then a rule, 32 pt of space, and a group headed **Remove and
 delete** holding **Remove from This Mac…** and **Remove Copies from iCloud…** on one row (each
 removes one copy and keeps a checked one; the second's sheet asks *RAW copies*, *Packed copies* or
 *Both*, and takes a copy up there only when this Mac holds its RAWs, the same bytes), and **Let Go

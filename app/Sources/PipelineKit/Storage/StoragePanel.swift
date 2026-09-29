@@ -226,16 +226,24 @@ public struct StoragePanel: View {
                     .help(model.isFollowing ? Strings.Storage.waitForTheJob : "")
                     actionButton(.reclaim, Strings.Storage.reclaim)
                 }
-                // Only once there is something packed to check: a packed
-                // burst is made by Copy to iCloud, when he chooses Packed.
-                if (model.storage?.archive.packed_here ?? 0) > 0 {
+                // Only once there is something packed: a packed burst is made
+                // by Copy to iCloud, when he chooses Packed. Checking needs
+                // one on this Mac; unpacking takes them from here or iCloud.
+                if let a = model.storage?.archive, a.packed_here + a.packed_up > 0 {
                     GridRow {
                         Button(Strings.Storage.checkPacked) {
                             Task { _ = await model.checkPackedBursts() }
                         }
-                        .disabled(model.isFollowing)
+                        .disabled(model.isFollowing || a.packed_here == 0)
                         .help(model.isFollowing ? Strings.Storage.waitForTheJob : Strings.Storage.checkPackedHelp)
                         .accessibilityIdentifier("storage.checkPacked")
+                        Button(Strings.Storage.unpackToFolder) {
+                            guard let folder = UnpackFolderPicker.pick(shoot: shoot) else { return }
+                            Task { _ = await model.unpackPackedBursts(to: folder) }
+                        }
+                        .disabled(model.isFollowing)
+                        .help(model.isFollowing ? Strings.Storage.waitForTheJob : Strings.Storage.unpackHelp)
+                        .accessibilityIdentifier("storage.unpackToFolder")
                     }
                 }
             }

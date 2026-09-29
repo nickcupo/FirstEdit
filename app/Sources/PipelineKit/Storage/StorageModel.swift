@@ -281,6 +281,22 @@ public final class StorageModel {
         } catch { refusals.set(.storage, Strings.API.offline); return false }
     }
 
+    /// Every frame of the shoot's packed bursts, here or in iCloud, unpacked
+    /// as its RAW into a folder he chose. It writes only new files there and
+    /// changes nothing in the shoot or in iCloud, so there is no plan.
+    public func unpackPackedBursts(to folder: URL) async -> Bool {
+        guard let client else { return false }
+        do {
+            let ok = try await client.post(Routes.storageUnpack,
+                                           UnpackBody(name: shoot, dest: folder.path))
+            guard note(ok) else { return false }
+            startFollowing(ok.id)
+            return true
+        } catch let e as StudioError {
+            refusals.set(.storage, e.sentence); return false
+        } catch { refusals.set(.storage, Strings.API.offline); return false }
+    }
+
     public func setRetention(days: Int, asDefault: Bool) async {
         guard let client else { return }
         do {

@@ -288,6 +288,7 @@ STAGE_WORDS = {
     "pack": ("packing bursts", "frames"),
     "checkpacked": ("checking the packed bursts", "frames"),
     "trim": ("removing copies from iCloud", "files"),
+    "unpack": ("unpacking", "frames"),
 }
 INGEST_WEIGHTS = {"copy": 70, "verify": 30}
 # By what was asked of the copy. Without a check there is no second stage, so
@@ -312,7 +313,7 @@ SETUP_WEIGHTS = {"clip": 100}
 UPDATE_WEIGHTS = {"download": 90, "stage": 10}
 # One stage each: a push is a push. Held as a dict per verb so the bar's
 # arithmetic below is the same for these as it is for a cull.
-STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack", "checkpacked", "trim")}
+STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack", "checkpacked", "trim", "unpack")}
 # By kind, for the jobs that are one stage long and are not storage verbs. An
 # Instagram make was weighed against the cull's table, where "instagram" is
 # not a stage, and its bar sat at 0% until it ended. The planning pass is added
@@ -4502,7 +4503,8 @@ STOR_TITLES = {"push": "copying the RAWs of {n} to iCloud",
                "check": "checking every original of {n}",
                "pack": "packing the bursts of {n}",
                "checkpacked": "checking the packed bursts of {n}",
-               "trim": "removing copies of {n} from iCloud"}
+               "trim": "removing copies of {n} from iCloud",
+               "unpack": "unpacking the bursts of {n}"}
 
 
 # ------------------------------------------ the list of work he asked for
@@ -7020,6 +7022,16 @@ class Handler(BaseHTTPRequestHandler):
                 verb = "checkpacked" if body.get("packed") else "check"
                 return self._job(body, f"stor-{verb}", STOR_TITLES[verb].format(n=s.folder.name),
                                  _stor_argv(s, verb, body, apply=False), _job_log(s), s.folder.name)
+            if u.path == "/api/storage/unpack":
+                # Writes only new files, into a folder he chose in the app's
+                # own panel; nothing in the shoot or in iCloud changes. So no
+                # plan, as with the checks.
+                dest = str(body.get("dest") or "")
+                if not dest.startswith("/") or "\0" in dest:
+                    return self._json({"error": "choose a folder to unpack into"})
+                argv = [PY, str(HERE / "burstpack.py"), "export", str(s.folder), dest]
+                return self._job(body, "stor-unpack", STOR_TITLES["unpack"].format(n=s.folder.name),
+                                 argv, _job_log(s), s.folder.name)
             if u.path == "/api/storage/plan":
                 what = body.get("what")
                 if what not in STOR_VERBS:

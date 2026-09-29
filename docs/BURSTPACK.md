@@ -108,6 +108,10 @@ ARW (`archive.py`, "packed bursts"). The storage panel on Finish, top to bottom:
   a packed frame is unpacked from the shoot's own `packed/` when that file is
   the one recorded, else from the copy in iCloud, and checked before it takes
   the RAW's name.
+- **Unpack to a Folder…**, beside it, asks for a folder and unpacks every
+  frame of the shoot's packed bursts - from `packed/`, or from iCloud - into
+  it as the RAW it was, with its name and time (`burstpack.py export`). It
+  never writes over a file, and changes nothing in the shoot or in iCloud.
 - **Check the Packed Bursts**, shown once a shoot has packed bursts, unpacks
   each in memory and checks every frame against its checksum and the RAW on
   this Mac. It reads only.

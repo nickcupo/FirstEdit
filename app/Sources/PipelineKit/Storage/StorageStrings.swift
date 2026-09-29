@@ -99,6 +99,23 @@ extension Strings {
               "Unpacks every packed burst in memory and checks each frame against its checksum and the RAW on this Mac. Nothing is written.",
               "The help tag of Check the Packed Bursts.")
         }
+        public static var unpackToFolder: String {
+            s("storage.unpackToFolder", "Unpack to a Folder…",
+              "Puts every packed burst's frames, as RAWs, into a folder he chooses. The ellipsis is the folder panel.")
+        }
+        public static var unpackHelp: String {
+            s("storage.unpackHelp",
+              "Unpacks every frame of this shoot's packed bursts, here or in iCloud, as its original RAW into a folder you choose. Nothing is written over, and nothing in the shoot or in iCloud changes.",
+              "The help tag of Unpack to a Folder.")
+        }
+        public static var unpackHere: String {
+            s("storage.unpackHere", "Unpack Here", "The folder panel's button for Unpack to a Folder.")
+        }
+        public static func unpackMessage(_ shoot: String) -> String {
+            String(localized: "storage.unpackMessage",
+                   defaultValue: "Choose where to put the RAWs of \(shoot). A file already there is never written over.",
+                   comment: "The folder panel's message for Unpack to a Folder.")
+        }
         public static var trimNothingHere: String {
             s("storage.trimNothingHere", "None of its RAWs are on this Mac, so every copy in iCloud is still needed.",
               "Why Remove Copies from iCloud is off.")
