@@ -286,6 +286,7 @@ STAGE_WORDS = {
     "pull": ("bringing frames back", "frames"), "expire": ("removing from iCloud", "files"),
     "check": ("checking every original", "frames"), "reclaim": ("taking back cache", "files"),
     "pack": ("packing bursts", "frames"),
+    "checkpacked": ("checking the packed bursts", "frames"),
 }
 INGEST_WEIGHTS = {"copy": 70, "verify": 30}
 # By what was asked of the copy. Without a check there is no second stage, so
@@ -310,7 +311,7 @@ SETUP_WEIGHTS = {"clip": 100}
 UPDATE_WEIGHTS = {"download": 90, "stage": 10}
 # One stage each: a push is a push. Held as a dict per verb so the bar's
 # arithmetic below is the same for these as it is for a cull.
-STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack")}
+STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack", "checkpacked")}
 # By kind, for the jobs that are one stage long and are not storage verbs. An
 # Instagram make was weighed against the cull's table, where "instagram" is
 # not a stage, and its bar sat at 0% until it ended. The planning pass is added
@@ -4021,6 +4022,9 @@ def _stor_argv(s: Shoot, what: str, body: dict, apply: bool) -> list[str]:
         # Burstpack: every burst into packed/, each checked frame by frame
         # before it is kept. It removes nothing, so it sits with push and pull.
         cmd = [PY, str(HERE / "burstpack.py"), "shoot", str(s.folder)]
+    elif what == "checkpacked":
+        # Reads only: every packed burst unpacked in memory and checked.
+        return [PY, str(HERE / "burstpack.py"), "check", str(s.folder)]
     elif what == "check":
         cmd = [PY, str(HERE / "reclaim.py"), "verify", str(s.folder)]
         return cmd + (["--record"] if body.get("record") else [])
@@ -4465,7 +4469,8 @@ STOR_TITLES = {"push": "copying the RAWs of {n} to iCloud",
                "expire": "letting go of the RAWs of {n} in iCloud",
                "reclaim": "taking back {n}'s cache",
                "check": "checking every original of {n}",
-               "pack": "packing the bursts of {n}"}
+               "pack": "packing the bursts of {n}",
+               "checkpacked": "checking the packed bursts of {n}"}
 
 
 # ------------------------------------------ the list of work he asked for
@@ -6972,9 +6977,12 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/storage/check":
                 # Nothing to confirm: verify reads and compares, and --record
                 # only fills in checksums that were never taken. It is the one
-                # storage job with no plan in front of it.
-                return self._job(body, "stor-check", STOR_TITLES["check"].format(n=s.folder.name),
-                                 _stor_argv(s, "check", body, apply=False), _job_log(s), s.folder.name)
+                # storage job with no plan in front of it. {"packed": true}
+                # asks the same of the shoot's packed bursts, which also only
+                # reads.
+                verb = "checkpacked" if body.get("packed") else "check"
+                return self._job(body, f"stor-{verb}", STOR_TITLES[verb].format(n=s.folder.name),
+                                 _stor_argv(s, verb, body, apply=False), _job_log(s), s.folder.name)
             if u.path == "/api/storage/plan":
                 what = body.get("what")
                 if what not in STOR_VERBS:

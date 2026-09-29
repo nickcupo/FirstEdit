@@ -408,33 +408,96 @@ def dest_for(shoot: Path, name: str) -> Path:
     return ARCHIVE / Path(shoot).name / name
 
 
+# ------------------------------------------------------------ packed bursts
+#
+# A burst packed on the Finish page (burstpack.py) is a second form a frame's
+# copy in iCloud can take: packed/<burst>.fbp in the shoot's archive folder,
+# holding every frame of the burst losslessly, at about half the size. push
+# sends it instead of the burst's ARWs; drop and pull accept it as the copy.
+#
+# The record is archive.json's "packed": for each file its bytes and SHA-256,
+# and for each frame in it that frame's bytes and SHA-256 as it was packed.
+# Nothing here trusts a packed file on its record alone. push unpacks it in
+# memory, and checks every frame against the RAW on this disk, before copying
+# it; drop unpacks the copy IN iCloud and removes a RAW only when what comes
+# out is, byte for byte, the RAW it is about to remove; pull checks what it
+# writes against the record before the name is given to it.
+
+PACKED = "packed"
+
+
+def packed_dest(shoot: Path, file: str) -> Path:
+    return ARCHIVE / Path(shoot).name / PACKED / file
+
+
+def packed_frames(man: dict) -> dict[str, tuple[str, dict]]:
+    """Every frame recorded in a packed file up there: name -> (file, frame record)."""
+    out: dict[str, tuple[str, dict]] = {}
+    for file, rec in (man.get("packed") or {}).items():
+        for name, fr in (rec.get("frames") or {}).items():
+            out.setdefault(name, (file, fr))
+    return out
+
+
+def _burstpack():
+    sys.path.insert(0, str(HERE))
+    import burstpack
+    return burstpack
+
+
+def unpacked_hashes(p: Path) -> dict[str, str]:
+    """name -> SHA-256 of every frame this packed file gives back, unpacked in
+    memory. burstpack checks each frame against the checksum the file carries
+    and refuses the whole file if any differs; ValueError, or OSError, if it
+    cannot be read or unpacked at all."""
+    bp = _burstpack()
+    return {name: hashlib.sha256(data).hexdigest() for name, data in bp._unpack_bytes(p.read_bytes()).items()}
+
+
+def local_packed(shoot: Path) -> list[Path]:
+    d = Path(shoot) / PACKED
+    return sorted(q for q in d.glob("*.fbp") if not q.name.startswith(".")) if d.is_dir() else []
+
+
 # ------------------------------------------------------------ status
 
 def status(shoot: Path) -> dict:
     """What is true right now, per frame, without trusting the manifest."""
     shoot = Path(shoot).expanduser().resolve()
     raw, _ = parts(shoot)
-    man = load_manifest(shoot)["frames"]
+    whole = load_manifest(shoot)
+    man = whole["frames"]
+    packed = packed_frames(whole)
+
+    def up_of(name: str) -> tuple[bool, bool]:
+        # The ARW copy when there is one; else the packed file holding the frame.
+        d = dest_for(shoot, name)
+        if d.exists() or name not in packed:
+            return d.exists(), local(d)
+        q = packed_dest(shoot, packed[name][0])
+        return q.exists(), local(q)
+
     rows = []
     for p in originals(raw):
-        d = dest_for(shoot, p.name)
+        up, up_local = up_of(p.name)
         rows.append({
             "name": p.name,
             "bytes": p.stat().st_size,
             "here": local(p),
             "here_evicted": is_dataless(p),
-            "up": d.exists(),
-            "up_local": local(d),
-            "recorded": p.name in man,
+            "up": up,
+            "up_local": up_local,
+            "recorded": p.name in man or p.name in packed,
         })
     # Frames that are in the manifest and no longer beside the RAWs: already dropped.
     here = {r["name"] for r in rows}
-    for name, rec in man.items():
+    for name, rec in [*man.items(), *((n, fr) for n, (_f, fr) in packed.items() if n not in man)]:
         if name not in here:
-            d = dest_for(shoot, name)
+            up, up_local = up_of(name)
             rows.append({"name": name, "bytes": rec.get("bytes", 0), "here": False,
-                         "here_evicted": False, "up": d.exists(), "up_local": local(d),
+                         "here_evicted": False, "up": up, "up_local": up_local,
                          "recorded": True, "dropped": True})
+            here.add(name)
     return {"shoot": shoot, "rows": rows, "finished": finished(shoot)}
 
 
@@ -497,6 +560,32 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
         return 1
 
     man = load_manifest(shoot)
+    man.setdefault("packed", {})
+    # The shoot's packed bursts go up in place of their frames' ARWs, whichever
+    # of those frames are not up already. Which frames a file holds is read off
+    # the file itself here; that it holds exactly the RAWs on this disk is
+    # proved before it is copied, below, and a file that fails the proof is
+    # passed over for its ARWs.
+    bp_files: list[tuple[Path, list[str]]] = []
+    covered: set[str] = set()
+    up_already: set[str] = set()
+    for file, rec in man["packed"].items():
+        q = packed_dest(shoot, file)
+        if q.exists() and q.stat().st_size == rec.get("bytes"):
+            up_already |= set(rec.get("frames") or {})
+    covered |= up_already
+    for q in local_packed(shoot):
+        if q.name in man["packed"] and packed_dest(shoot, q.name).exists():
+            continue
+        try:
+            inside = [f["name"] for f in _burstpack().read_manifest(q.read_bytes())[0]["frames"]]
+        except (OSError, ValueError, KeyError):
+            print(f"    {q.name}: not a packed burst this can read; its frames go up as RAWs")
+            continue
+        need = [n for n in inside if not (man["frames"].get(n) and dest_for(shoot, n).exists())]
+        if need:
+            bp_files.append((q, inside))
+            covered |= set(inside)
     todo, already = [], 0
     for p in frames:
         rec = man["frames"].get(p.name)
@@ -504,12 +593,23 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
         if rec and d.exists() and d.stat().st_size == rec.get("bytes"):
             already += 1
             continue
+        if p.name in up_already:
+            already += 1              # in a packed burst that is up already
+            continue
+        if p.name in covered:
+            continue
         todo.append(p)
 
-    total = sum(p.stat().st_size for p in todo)
+    packed_frames_n = sum(len(inside) for _q, inside in bp_files)
+    packed_bytes = sum(q.stat().st_size for q, _ in bp_files)
+    total = sum(p.stat().st_size for p in todo) + packed_bytes
     print(f"  {shoot.name}: {len(frames)} originals, {already} already up")
-    print(f"  would copy {len(todo)} frames, {human(total)}, to {dest_for(shoot, '').parent}")
-    if not todo:
+    print(f"  would copy {len(todo) + packed_frames_n} frames, {human(total)}, to {dest_for(shoot, '').parent}")
+    if bp_files:
+        raw_size = sum((raw / n).stat().st_size for _q, inside in bp_files for n in inside if (raw / n).exists())
+        print(f"  {packed_frames_n} of them as {len(bp_files)} packed bursts: {human(packed_bytes)} "
+              f"in place of {human(raw_size)} of RAWs, each unpacked and checked against the RAWs here first")
+    if not todo and not bp_files:
         print("  nothing to do.")
         return 0
     if not apply:
@@ -527,11 +627,55 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
     # and the next push copied all 2.3 GB up again.
     manifest_path(shoot).parent.mkdir(parents=True, exist_ok=True)
     ok = failed = 0
+    steps = len(todo) + packed_frames_n
+    step = 0
+    by_name = {p.name: p for p in frames}
+    for q, inside in bp_files:
+        progress("push", step, steps)
+        d = packed_dest(shoot, q.name)
+        tmp = d.parent / f".{q.name}.part"
+        try:
+            # The proof: what the file gives back is, frame by frame, the RAW
+            # on this disk. A frame whose RAW is not here is taken on the
+            # file's own checksum, which burstpack has already matched.
+            got = unpacked_hashes(q)
+            wrong = [n for n in inside if n not in got
+                     or (n in by_name and local(by_name[n]) and sha256(by_name[n]) != got[n])]
+            if wrong:
+                print(f"    {q.name}: does not unpack to the RAWs here ({wrong[0]}); its frames go up as RAWs")
+                todo += [by_name[n] for n in inside if n in by_name and n not in {p.name for p in todo}]
+                continue
+            want = sha256(q)
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(q, tmp)
+            if sha256(tmp) != want:
+                tmp.unlink(missing_ok=True)
+                print(f"    {q.name}: copied wrong, left alone")
+                failed += len(inside)
+                continue
+            os.replace(tmp, d)
+            man["packed"][q.name] = {
+                "bytes": q.stat().st_size, "sha256": want,
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "frames": {n: {"bytes": (by_name[n].stat().st_size if n in by_name else 0), "sha256": got[n]}
+                           for n in inside}}
+            ok += len(inside)
+        except (OSError, ValueError) as e:
+            tmp.unlink(missing_ok=True)
+            print(f"    {q.name}: {e}")
+            failed += len(inside)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            write_json_atomic(manifest_path(shoot), man)
+            raise
+        step += len(inside)
+        print(f"    {step}/{steps} copied and verified")
+        write_json_atomic(manifest_path(shoot), man)
     for i, p in enumerate(todo, 1):
         # At the head of the loop, not the foot: a frame that copies wrong
         # takes a `continue`, and a bar that stops moving on the runs worth
         # watching is worse than no bar.
-        progress("push", i - 1, len(todo))
+        progress("push", step + i - 1, step + len(todo))
         d = dest_dir / p.name
         tmp = dest_dir / f".{p.name}.part"
         try:
@@ -565,7 +709,7 @@ def push(shoot: Path, apply: bool, force: bool = False) -> int:
         if i % 50 == 0 or i == len(todo):
             print(f"    {i}/{len(todo)} copied and verified")
             write_json_atomic(manifest_path(shoot), man)
-    progress("push", len(todo), len(todo))
+    progress("push", step + len(todo), step + len(todo))
     write_json_atomic(manifest_path(shoot), man)
     if for_the_app():
         # One line, and the last: the panel says it under "Finished copying
@@ -631,8 +775,10 @@ def drop(shoot: Path, apply: bool) -> int:
         print(f"  {shoot.name} is not finished yet, so its RAWs are still going to be read. Nothing was removed.")
         print("  Press Finish This Shoot on its Finish step first.")
         return 1
-    man = load_manifest(shoot)["frames"]
-    if not man:
+    whole = load_manifest(shoot)
+    man = whole["frames"]
+    packed = packed_frames(whole)
+    if not man and not packed:
         print(f"  {shoot.name} has no archive manifest: nothing was ever pushed.")
         return 1
 
@@ -640,28 +786,81 @@ def drop(shoot: Path, apply: bool) -> int:
     names = inode_names(shoot)
     safe, refused = [], []
     unmanaged = 0
-    # The bar counts this loop rather than the unlinking below it. Dropping
-    # the action shoot reads 26.9 GB back out of iCloud to re-hash it and
-    # then makes about 1,157 unlink() calls: all of the waiting is here.
-    for i, p in enumerate(frames):
-        progress("drop", i, len(frames))
+    # What each packed copy in iCloud unpacks to, worked out once per file:
+    # file -> (name -> SHA-256), or the reason it cannot be relied on.
+    unpacked: dict[str, dict[str, str] | str] = {}
+
+    def by_arw(p: Path) -> tuple[Path | None, dict | None, str]:
+        """(the copy, its record, why not): the ARW in iCloud."""
         rec = man.get(p.name)
         d = dest_for(shoot, p.name)
         if not rec:
-            refused.append((p, "never pushed"))
-            continue
+            return None, None, "never pushed"
         if not d.exists():
-            refused.append((p, "not in iCloud"))
-            continue
+            return None, None, "not in iCloud"
         # The copy has to be HERE to be hashed. An evicted archive copy cannot
         # be verified without downloading it, and dropping the local original
         # on the strength of a file we have not read is the one thing this must
         # never do.
         if not local(d):
-            refused.append((p, "the iCloud copy is evicted; it must come down to be checked"))
-            continue
+            return None, None, "the iCloud copy is evicted; it must come down to be checked"
         if d.stat().st_size != rec.get("bytes"):
-            refused.append((p, "the iCloud copy is a different size"))
+            return None, None, "the iCloud copy is a different size"
+        why = _unvouched(d)
+        if why:
+            return None, None, why
+        if sha256(d) != rec.get("sha256"):
+            return None, None, "the iCloud copy does not match what was pushed"
+        return d, rec, ""
+
+    def by_packed(p: Path) -> tuple[Path | None, dict | None, str]:
+        """(the copy, the frame's record, why not): the packed burst in iCloud,
+        unpacked, giving back this frame."""
+        if p.name not in packed:
+            return None, None, ""
+        file, fr = packed[p.name]
+        arec = whole["packed"][file]
+        q = packed_dest(shoot, file)
+        if not q.exists():
+            return None, None, "its packed burst is not in iCloud"
+        if not local(q):
+            return None, None, "its packed burst in iCloud is evicted; it must come down to be checked"
+        if q.stat().st_size != arec.get("bytes"):
+            return None, None, "its packed burst in iCloud is a different size"
+        why = _unvouched(q)
+        if why:
+            return None, None, why
+        if file not in unpacked:
+            if sha256(q) != arec.get("sha256"):
+                unpacked[file] = "its packed burst in iCloud does not match what was pushed"
+            else:
+                try:
+                    unpacked[file] = unpacked_hashes(q)
+                except (OSError, ValueError) as e:
+                    unpacked[file] = f"its packed burst in iCloud does not unpack ({e})"
+        got = unpacked[file]
+        if isinstance(got, str):
+            return None, None, got
+        if got.get(p.name) != fr.get("sha256"):
+            return None, None, "its packed burst in iCloud does not give this frame back as it was packed"
+        return q, fr, ""
+
+    # The bar counts this loop rather than the unlinking below it. Dropping
+    # the action shoot reads 26.9 GB back out of iCloud to re-hash it and
+    # then makes about 1,157 unlink() calls: all of the waiting is here.
+    for i, p in enumerate(frames):
+        progress("drop", i, len(frames))
+        # Either copy will do, the ARW first. Each has been read back out of
+        # iCloud and matched to its record before it is relied on at all.
+        d, rec, why = by_arw(p)
+        if d is None:
+            d2, rec2, why2 = by_packed(p)
+            if d2 is not None:
+                d, rec, why = d2, rec2, ""
+            elif why2 and why in ("never pushed", "not in iCloud"):
+                why = why2
+        if d is None:
+            refused.append((p, why))
             continue
         # And the file about to be removed has to be the one that was
         # archived. Only the iCloud copy was checked, so a RAW that had taken
@@ -684,13 +883,6 @@ def drop(shoot: Path, apply: bool) -> int:
             # being reported as dropped while its bytes are still on the disk.
             refused.append((p, f"it also has a name of yours, {theirs[0].relative_to(shoot)}, which drop "
                                "does not remove, so removing the others would free nothing"))
-            continue
-        why = _unvouched(d)
-        if why:
-            refused.append((p, why))
-            continue
-        if sha256(d) != rec.get("sha256"):
-            refused.append((p, "the iCloud copy does not match what was pushed"))
             continue
         if sha256(p) != rec.get("sha256"):
             refused.append((p, "the file here is not the one that was archived"))
@@ -783,8 +975,10 @@ def drop(shoot: Path, apply: bool) -> int:
 def pull(shoot: Path, apply: bool) -> int:
     shoot = Path(shoot).expanduser().resolve()
     raw, _ = parts(shoot)
-    man = load_manifest(shoot)["frames"]
-    if not man:
+    whole = load_manifest(shoot)
+    man = whole["frames"]
+    packed = packed_frames(whole)
+    if not man and not packed:
         print(f"  {shoot.name} has no archive manifest.")
         return 1
     # Wanted is "no bytes here", not "no name here". A name with nothing
@@ -792,8 +986,15 @@ def pull(shoot: Path, apply: bool) -> int:
     # exists(), so pull skipped exactly the frames the panel was offering to
     # bring back. Restoring over such a name is safe: the copy lands as a
     # .part and is renamed over it only once it hashes right.
-    want = [(n, r) for n, r in sorted(man.items()) if not local(raw / n)]
-    evicted = [n for n, _ in want if is_dataless(dest_for(shoot, n))]
+    #
+    # A frame whose only copy is in a packed burst is unpacked from it: from
+    # the shoot's own packed/ when that file is the one recorded, which needs
+    # no download, else from the copy in iCloud.
+    both = {**{n: fr for n, (_f, fr) in packed.items()}, **man}
+    want = [(n, r) for n, r in sorted(both.items()) if not local(raw / n)]
+    arw = {n for n in man if dest_for(shoot, n).exists()}
+    evicted = [n for n, _ in want if (is_dataless(dest_for(shoot, n)) if n in arw
+                                      else n in packed and is_dataless(packed_dest(shoot, packed[n][0])))]
     total = sum(r.get("bytes", 0) for _, r in want)
     print(f"  {shoot.name}: {len(want)} frames to bring back, {human(total)}")
     if evicted:
@@ -807,10 +1008,66 @@ def pull(shoot: Path, apply: bool) -> int:
     raw.mkdir(parents=True, exist_ok=True)
     ok = bad = 0
     gave_up, waited_out = "", 0
+    opened: dict[str, dict[str, bytes] | str] = {}
+
+    def from_packed(name: str) -> bytes | str:
+        """The frame's bytes out of its packed burst, or why they could not be had."""
+        file, _fr = packed[name]
+        if file not in opened:
+            arec = whole["packed"][file]
+            here_q, up_q = shoot / PACKED / file, packed_dest(shoot, file)
+            src = here_q if (local(here_q) and here_q.stat().st_size == arec.get("bytes")
+                             and sha256(here_q) == arec.get("sha256")) else up_q
+            if src is up_q:
+                if not up_q.exists():
+                    opened[file] = "its packed burst is not in iCloud"
+                elif not local(up_q) and not materialise(up_q):
+                    opened[file] = "iCloud did not hand its packed burst over"
+            if file not in opened:
+                try:
+                    wanted = {n for n, _ in want if n in packed and packed[n][0] == file}
+                    opened[file] = _burstpack()._unpack_bytes(src.read_bytes(), wanted)
+                except (OSError, ValueError) as e:
+                    opened[file] = f"its packed burst does not unpack ({e})"
+        got = opened[file]
+        if isinstance(got, str):
+            return got
+        # Taken, not read: a shoot's worth of unpacked frames is never held at once.
+        return got.pop(name, None) or "its packed burst does not hold it"
+
     for i, (name, rec) in enumerate(want, 1):
         progress("pull", i - 1, len(want))
         d = dest_for(shoot, name)
         here = raw / name
+        if name not in arw and name in packed:
+            data = from_packed(name)
+            if isinstance(data, str):
+                print(f"    {name}: {data}")
+                bad += 1
+                continue
+            if is_dataless(here) and here.stat().st_size != len(data):
+                print(f"    {name}: a different file of this name is here, evicted; left alone")
+                bad += 1
+                continue
+            tmp = raw / f".{name}.part"
+            try:
+                tmp.write_bytes(data)
+                if sha256(tmp) != rec.get("sha256"):
+                    tmp.unlink(missing_ok=True)
+                    print(f"    {name}: came back wrong, not kept")
+                    bad += 1
+                    continue
+                os.replace(tmp, here)
+                ok += 1
+            except OSError as e:
+                tmp.unlink(missing_ok=True)
+                print(f"    {name}: {e}")
+                bad += 1
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
+            continue
+        rec = man.get(name, rec)
         if not d.exists():
             print(f"    {name}: not in iCloud")
             bad += 1

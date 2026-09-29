@@ -91,10 +91,29 @@ Measured on the five HDR+ bursts above (12 MP), in a 4-core Linux container:
 A 24 MP frame is about twice the work. An Apple silicon core is faster than
 this container's, and has more of them beside it; that has not been measured.
 
+## In iCloud
+
+A packed burst is a second form a frame's copy in iCloud can take, beside its
+ARW (`archive.py`, "packed bursts"):
+
+- **Copy the RAWs to iCloud** sends a shoot's packed bursts in place of their
+  frames' ARWs, to `packed/` in the shoot's archive folder. Each is unpacked
+  in memory and every frame matched to the RAW on this Mac before it is
+  copied, and the copy is read back. A burst that does not match goes up as
+  its ARWs instead. `archive.json` records each file's checksum and each
+  frame's.
+- **Remove the Local RAWs** takes a frame on the strength of its packed copy
+  only when that copy is in iCloud, downloaded, vouched for by iCloud, matches
+  its record, and unpacks - that very copy - to the exact bytes of the RAW
+  about to be removed. Every other rule of drop still applies.
+- **Bring the RAWs Back** unpacks a frame from the shoot's own `packed/` when
+  that file is the one recorded, else from the copy in iCloud, and checks it
+  before it takes the RAW's name.
+- **Check the Packed Bursts** unpacks every packed burst in memory and checks
+  each frame against its checksum and the RAW on this Mac. It reads only.
+- **Let Go of the RAWs in iCloud** never touches a packed burst.
+
 ## Not done
 
-- `./pl archive` does not use it. Letting a packed burst stand in for the
-  originals in iCloud is a separate decision.
-- A packed burst does not yet stand in for its RAWs: Remove the Local RAWs
-  and Copy the RAWs to iCloud still work on the ARWs themselves.
+- The panel's "in iCloud" size counts a packed frame at its RAW's size.
 - Uncompressed ARW and DNG are only xz'd.

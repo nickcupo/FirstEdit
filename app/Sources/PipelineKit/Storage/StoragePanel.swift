@@ -230,6 +230,12 @@ public struct StoragePanel: View {
                 // It takes nothing away, so it sits with the copies.
                 GridRow {
                     actionButton(.pack, Strings.Storage.pack)
+                    Button(Strings.Storage.checkPacked) {
+                        Task { _ = await model.checkPackedBursts() }
+                    }
+                    .disabled(model.isFollowing)
+                    .help(model.isFollowing ? Strings.Storage.waitForTheJob : Strings.Storage.checkPackedHelp)
+                    .accessibilityIdentifier("storage.checkPacked")
                 }
             }
             .buttonStyle(.bordered)

@@ -61,6 +61,7 @@ extension Strings {
             case "stor-pull": return q("queue.what.pull", "Bring the RAWs back", "A piece of work on the list.")
             case "stor-check": return q("queue.what.check", "Check every original", "A piece of work on the list.")
             case "stor-pack": return q("queue.what.pack", "Pack the bursts", "A piece of work on the list.")
+            case "stor-checkpacked": return q("queue.what.checkPacked", "Check the packed bursts", "A piece of work on the list.")
             // A plan is named for what it checks. All five were "Work out
             // what would go", which a copy to iCloud does not do, while the
             // notification that sent him to the row named the plan itself.

@@ -65,6 +65,15 @@ extension Strings {
             s("storage.nothingInICloud", "Nothing of this shoot is in iCloud.",
               "Why Bring the RAWs Back or Let Go is off.")
         }
+        public static var checkPacked: String {
+            s("storage.checkPacked", "Check the Packed Bursts",
+              "Unpacks every packed burst in memory and checks each frame. No ellipsis: it reads only.")
+        }
+        public static var checkPackedHelp: String {
+            s("storage.checkPackedHelp",
+              "Unpacks every packed burst in memory and checks each frame against its checksum and the RAW on this Mac. Nothing is written.",
+              "The help tag of Check the Packed Bursts.")
+        }
         public static var packNothingHere: String {
             s("storage.packNothingHere", "None of this shoot's RAWs are on this Mac to pack.",
               "Why Pack Bursts is off.")

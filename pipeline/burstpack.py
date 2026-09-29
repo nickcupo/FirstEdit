@@ -1446,6 +1446,58 @@ def _pack_parallel(jobs: list[tuple], workers: int, tick, ended) -> None:
             break
 
 
+def check_shoot(shoot: Path, log=print) -> int:
+    """Unpack every packed burst of a shoot in memory and check it: each frame
+    against the checksum it was packed with, and against the RAW on this disk
+    when that is here. Reads only; nothing is written anywhere."""
+    sys.path.insert(0, str(_here()))
+    import archive  # noqa: E402
+    import library  # noqa: E402
+    from common import human  # noqa: E402
+    where = library.paths(Path(shoot).expanduser().resolve())
+    files = archive.local_packed(where.shoot)
+    if not files:
+        log(f"{where.shoot.name} has no packed bursts to check.")
+        return 0
+    try:
+        raw = library.raw_dir(where.shoot)
+    except library.NotAShoot:
+        raw = where.shoot / "raw"
+    total = sum(len(read_manifest(q.read_bytes())[0]["frames"]) for q in files)
+    good = bad = matched = 0
+    done = 0
+    log(f"@@ checkpacked 0 {total}")
+    for q in files:
+        try:
+            got = _unpack_bytes(q.read_bytes())
+        except ValueError as e:
+            m, _ = read_manifest(q.read_bytes())
+            n = len(m["frames"])
+            bad += n
+            done += n
+            log(f"  - {q.name}: does not unpack: {e}")
+            log(f"@@ checkpacked {done} {total}")
+            continue
+        for name, data in got.items():
+            done += 1
+            here = raw / name
+            if archive.local(here):
+                if hashlib.sha256(data).hexdigest() != archive.sha256(here):
+                    bad += 1
+                    log(f"  - {name}: unpacks whole, but differs from the RAW in {raw.name}/")
+                    continue
+                matched += 1
+            good += 1
+            log(f"@@ checkpacked {done} {total}")
+        log(f"  {q.name}: {len(got)} frames unpacked and matched, {human(q.stat().st_size)}")
+    said = (f"{good} of {total} frames unpack exactly as they were packed; "
+            f"{matched} of them also match the RAW on this Mac.")
+    if bad:
+        said += f" {bad} do not, and are listed above."
+    log(said)
+    return 1 if bad else 0
+
+
 def _here() -> Path:
     return Path(__file__).resolve().parent
 
@@ -1468,6 +1520,8 @@ def main(argv: list[str] | None = None) -> int:
     sh = sub.add_parser("shoot")
     sh.add_argument("shoot", type=Path)
     sh.add_argument("--apply", action="store_true")
+    ck = sub.add_parser("check")
+    ck.add_argument("shoot", type=Path)
     b = sub.add_parser("bench")
     b.add_argument("shoot", type=Path)
     b.add_argument("--bursts", type=int, default=3)
@@ -1497,6 +1551,8 @@ def main(argv: list[str] | None = None) -> int:
         from common import stop_cleanly_on_sigterm  # noqa: E402
         stop_cleanly_on_sigterm()
         return pack_shoot(a.shoot, a.apply, log=lambda line: print(line, flush=True))
+    elif a.cmd == "check":
+        return check_shoot(a.shoot, log=lambda line: print(line, flush=True))
     elif a.cmd == "bench":
         bursts = bursts_of(a.shoot)[:a.bursts]
         if not bursts:

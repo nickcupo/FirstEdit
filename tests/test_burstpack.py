@@ -400,3 +400,93 @@ def test_every_frame_is_packed_or_named(tmp_path, monkeypatch):
     assert sorted(p.name for p in back.iterdir()) == sorted(p.name for p in raw.iterdir() if p != evicted)
     for p in back.iterdir():
         assert p.read_bytes() == (raw / p.name).read_bytes()
+
+
+# ------------------------------------------------- packed copies in iCloud
+
+def _finished_shoot(tmp_path: Path, monkeypatch) -> tuple[Path, dict[str, bytes]]:
+    import archive
+    shoot = _shoot(tmp_path)
+    (shoot / "shoot.json").write_text(json.dumps({"kind": "other", "finished": "2026-01-02"}))
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    bp.pack_shoot(shoot, apply=True, log=lambda *_: None)
+    return shoot, {p.name: p.read_bytes() for p in (shoot / "raw").iterdir()}
+
+
+def test_packed_bursts_go_up_come_down_and_let_the_raws_go(tmp_path, monkeypatch, capsys):
+    import archive
+    import reclaim
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    assert archive.push(shoot, apply=False) == 0
+    assert "5 of them as 2 packed bursts" in capsys.readouterr().out
+    assert archive.push(shoot, apply=True) == 0
+    up = tmp_path / "icloud" / shoot.name
+    assert sorted(p.name for p in (up / "packed").iterdir()) == ["burst-0.fbp", "burst-1.fbp"]
+    assert not list(up.glob("*.ARW")), "the packed bursts went up instead of the RAWs"
+    man = archive.load_manifest(shoot)
+    assert set(archive.packed_frames(man)) == set(raws)
+    assert all(r["up"] and r["recorded"] for r in archive.status(shoot)["rows"])
+    assert bp.check_shoot(shoot, log=lambda *_: None) == 0
+    assert archive.push(shoot, apply=False) == 0
+    assert "nothing to do." in capsys.readouterr().out, "nothing goes up twice"
+
+    assert archive.drop(shoot, apply=True) == 0
+    assert not list((shoot / "raw").iterdir())
+    rows = archive.status(shoot)["rows"]
+    assert len(rows) == 5 and all(r.get("dropped") and r["up"] for r in rows)
+    assert all(reclaim.archived_elsewhere(reclaim.Shoot(shoot)).values())
+
+    # Back from the copy in iCloud, with the shoot's own packed/ gone too.
+    import shutil
+    shutil.rmtree(shoot / "packed")
+    assert archive.pull(shoot, apply=True) == 0
+    assert {p.name: p.read_bytes() for p in (shoot / "raw").iterdir()} == raws
+
+
+def test_a_packed_copy_that_is_not_the_one_pushed_frees_nothing(tmp_path, monkeypatch, capsys):
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    archive.push(shoot, apply=True)
+    q = archive.packed_dest(shoot, "burst-0.fbp")
+    data = bytearray(q.read_bytes())
+    data[-100] ^= 1
+    q.write_bytes(bytes(data))
+    archive.drop(shoot, apply=True)
+    out = capsys.readouterr().out
+    assert "does not match what was pushed" in out
+    left = sorted(p.name for p in (shoot / "raw").iterdir())
+    assert left == ["TSC01000.ARW", "TSC01001.ARW", "TSC01002.ARW"], "burst 0 stays; burst 1 was proved and went"
+
+
+def test_a_packed_copy_is_unpacked_before_it_is_believed(tmp_path, monkeypatch, capsys):
+    """A copy whose record has been made to match it - so only unpacking it can
+    tell - does not let a RAW go."""
+    import archive
+    from common import write_json_atomic
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    archive.push(shoot, apply=True)
+    q = archive.packed_dest(shoot, "burst-1.fbp")
+    data = bytearray(q.read_bytes())
+    data[-100] ^= 1
+    q.write_bytes(bytes(data))
+    man = archive.load_manifest(shoot)
+    man["packed"]["burst-1.fbp"]["sha256"] = archive.sha256(q)
+    write_json_atomic(archive.manifest_path(shoot), man)
+    archive.drop(shoot, apply=True)
+    assert "does not unpack" in capsys.readouterr().out
+    assert sorted(p.name for p in (shoot / "raw").iterdir()) == ["TSC01003.ARW", "TSC01004.ARW"]
+
+
+def test_a_raw_changed_after_packing_goes_up_as_itself(tmp_path, monkeypatch, capsys):
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    p = shoot / "raw" / "TSC01003.ARW"
+    b = bytearray(p.read_bytes())
+    b[200] ^= 1
+    p.write_bytes(bytes(b))
+    assert bp.check_shoot(shoot, log=lambda *_: None) == 1, "the check says the packed copy is not this RAW"
+    archive.push(shoot, apply=True)
+    assert "does not unpack to the RAWs here" in capsys.readouterr().out
+    up = tmp_path / "icloud" / shoot.name
+    assert sorted(x.name for x in up.glob("*.ARW")) == ["TSC01003.ARW", "TSC01004.ARW"]
+    assert [x.name for x in (up / "packed").iterdir()] == ["burst-0.fbp"]

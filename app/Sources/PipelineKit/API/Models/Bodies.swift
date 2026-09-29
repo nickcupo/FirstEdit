@@ -125,7 +125,11 @@ public struct RetainBody: Encodable, Sendable {
 public struct StorageCheckBody: Encodable, Sendable {
     public let name: String
     public let record: Bool?
-    public init(name: String, record: Bool? = nil) { self.name = name; self.record = record }
+    /// Check the shoot's packed bursts instead of its originals.
+    public let packed: Bool?
+    public init(name: String, record: Bool? = nil, packed: Bool? = nil) {
+        self.name = name; self.record = record; self.packed = packed
+    }
 }
 
 public struct PlanBody: Encodable, Sendable {
