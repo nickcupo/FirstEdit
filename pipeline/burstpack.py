@@ -6,6 +6,7 @@ burstpack.py - a burst of RAWs kept as one frame and how the others differ.
     ./pl burstpack unpack <archive.fbp> <dir> [NAME...]   put the RAWs back, byte for byte
     ./pl burstpack verify <archive.fbp>                   unpack in memory and check every checksum
     ./pl burstpack list <archive.fbp>                     what is inside, and what each frame cost
+    ./pl burstpack shoot <shoot> [--apply]                every burst into <shoot>/packed/; the Finish page's Pack Bursts
     ./pl burstpack bench <shoot> [--bursts N]             what it would save on a shoot. Writes nothing
 
 A burst is ten frames of one moment. They share almost every pixel, and a file
@@ -1013,19 +1014,19 @@ def unpack(archive: Path, dest: Path, names: list[str] | None = None, log=print)
 
 # --------------------------------------------------------------------- CLI
 
-def bursts_of(shoot: Path) -> list[tuple[list[Path], str | None]]:
+def bursts_of(shoot: Path) -> list[tuple[str, list[Path], str | None]]:
     """The shoot's bursts as the cull grouped them, frames in capture order, each
     with the frame he kept from it if he kept one. Only frames whose bytes are
     on this Mac: an evicted RAW would be read back over the network."""
     import csv
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(_here()))
     import archive  # noqa: E402
     import library  # noqa: E402
     from common import decision_path  # noqa: E402
     where = library.paths(Path(shoot).expanduser().resolve())
     csv_path = where.cull / "cull.csv"
     if not csv_path.exists():
-        raise SystemExit(f"{where.shoot.name}: no cull.csv, so no bursts to pack")
+        return []
     sel = decision_path(where.cull, "selects.json")
     kept = {Path(n).stem for n in json.loads(sel.read_text())} if sel.exists() else set()
     groups: dict[str, list[tuple[str, str]]] = {}
@@ -1034,7 +1035,7 @@ def bursts_of(shoot: Path) -> list[tuple[list[Path], str | None]]:
             if r.get("burst") not in (None, ""):
                 groups.setdefault(r["burst"], []).append((r.get("shot_at", ""), r["file"]))
     out = []
-    for _, rows in sorted(groups.items(), key=lambda kv: min(kv[1])):
+    for bid, rows in sorted(groups.items(), key=lambda kv: min(kv[1])):
         files = []
         for _, name in sorted(rows):
             p = library.frame_raw(where.shoot, name)
@@ -1042,8 +1043,72 @@ def bursts_of(shoot: Path) -> list[tuple[list[Path], str | None]]:
                 files.append(p)
         if len(files) >= 2:
             key = next((p.name for p in files if p.stem in kept), None)
-            out.append((files, key))
+            out.append((bid, files, key))
     return out
+
+
+PACKED = "packed"
+
+
+def pack_shoot(shoot: Path, apply: bool, log=print) -> int:
+    """Every burst of a shoot, each into packed/burst-<n>.fbp beside raw/.
+
+    Without apply it only says what it would pack, which is what the Finish
+    page's list shows before he confirms. It removes nothing either way: the
+    RAWs stay where they are, and a burst already packed is left alone."""
+    sys.path.insert(0, str(_here()))
+    import library  # noqa: E402
+    from common import human  # noqa: E402
+    where = library.paths(Path(shoot).expanduser().resolve())
+    dest = where.shoot / PACKED
+    bursts = bursts_of(where.shoot)
+    todo = [(bid, files, key) for bid, files, key in bursts if not (dest / f"burst-{bid}.fbp").exists()]
+    nf = sum(len(f) for _, f, _ in todo)
+    size = sum(p.stat().st_size for _, f, _ in todo for p in f)
+    if not bursts:
+        log(f"{where.shoot.name} has no bursts of two or more RAWs on this Mac to pack.")
+        return 0
+    if not todo:
+        log(f"every burst of {where.shoot.name} is already packed, in {dest}")
+        return 0
+    if not apply:
+        log(f"would pack {nf} frames in {len(todo)} bursts, {human(size)}, into {dest}")
+        for bid, files, key in todo:
+            log(f"  burst {bid}: {len(files)} frames, {key or files[0].name} kept whole")
+        log("Nothing is removed: the RAWs stay where they are. Each burst is unpacked and checked "
+            "against every frame's checksum before it is kept.")
+        return 0
+    done = failed = 0
+    before = after = 0
+    log(f"@@ pack 0 {nf}")
+    for bid, files, key in todo:
+        out = dest / f"burst-{bid}.fbp"
+
+        def tick(line: str) -> None:
+            nonlocal done
+            log(line)
+            if line.startswith("  ") and " -> " in line:
+                done += 1
+                log(f"@@ pack {done} {nf}")
+        try:
+            m = pack(files, out, key, log=tick)
+        except Exception as e:      # one burst's failure is said, and the rest go on
+            failed += 1
+            log(f"  burst {bid}: not packed: {e}")
+            continue
+        b, a = sum(f["size"] for f in m["frames"]), out.stat().st_size
+        before, after = before + b, after + a
+        log(f"  burst {bid}: {human(b)} -> {human(a)} ({a / b:.0%}), every frame unpacked and matched")
+    if before:
+        log(f"packed {human(before)} of RAWs into {human(after)} ({after / before:.0%}), in {dest}")
+    if failed:
+        log(f"{failed} bursts could not be packed; their RAWs are untouched")
+        return 1
+    return 0
+
+
+def _here() -> Path:
+    return Path(__file__).resolve().parent
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1061,6 +1126,9 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("archive", type=Path)
     ls = sub.add_parser("list")
     ls.add_argument("archive", type=Path)
+    sh = sub.add_parser("shoot")
+    sh.add_argument("shoot", type=Path)
+    sh.add_argument("--apply", action="store_true")
     b = sub.add_parser("bench")
     b.add_argument("shoot", type=Path)
     b.add_argument("--bursts", type=int, default=3)
@@ -1083,6 +1151,8 @@ def main(argv: list[str] | None = None) -> int:
         for f in m["frames"]:
             ref = "whole" if f["ref"] is None else "from " + m["frames"][f["ref"]]["name"]
             print(f"  {f['name']:<16} {f['size']:>12,} -> {f['length']:>12,}  {f['length'] / f['size']:6.1%}  {f['codec']} {ref}")
+    elif a.cmd == "shoot":
+        return pack_shoot(a.shoot, a.apply, log=lambda line: print(line, flush=True))
     elif a.cmd == "bench":
         bursts = bursts_of(a.shoot)[:a.bursts]
         if not bursts:
@@ -1090,7 +1160,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         tot_in = tot_xz = tot_out = 0
         with tempfile.TemporaryDirectory() as td:
-            for i, (files, key) in enumerate(bursts):
+            for i, (_, files, key) in enumerate(bursts):
                 print(f"burst {i + 1}: {len(files)} frames, {key or files[0].name} whole")
                 out = Path(td) / f"b{i}.fbp"
                 m = pack(files, out, key)

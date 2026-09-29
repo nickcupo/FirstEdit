@@ -35,6 +35,10 @@ extension Strings {
             s("storage.pull", "Bring the RAWs Back…",
               "A frequent action. The ellipsis is the plan sheet, as in Shoot ▸ Storage.")
         }
+        public static var pack: String {
+            s("storage.pack", "Pack Bursts…",
+              "A frequent action: each burst kept as its keeper and how the rest differ, losslessly, in packed/. The ellipsis is the plan sheet.")
+        }
         /// An action's name with the engine's own figure for what it would
         /// carry: "Copy the RAWs to iCloud (36.3 GB)…".
         public static func sized(_ name: String, _ size: String) -> String {
@@ -60,6 +64,10 @@ extension Strings {
         public static var nothingInICloud: String {
             s("storage.nothingInICloud", "Nothing of this shoot is in iCloud.",
               "Why Bring the RAWs Back or Let Go is off.")
+        }
+        public static var packNothingHere: String {
+            s("storage.packNothingHere", "None of this shoot's RAWs are on this Mac to pack.",
+              "Why Pack Bursts is off.")
         }
         public static var pullNothing: String {
             s("storage.pullNothing", "Every RAW of this shoot in iCloud is already on this Mac.",
@@ -184,6 +192,9 @@ extension Strings {
             case "pull":
                 return s("storage.planTitle.pull", "This is what would be brought back",
                          "The plan sheet's title for Bring the RAWs Back.")
+            case "pack":
+                return s("storage.planTitle.pack", "These bursts would be packed",
+                         "The plan sheet's title for Pack Bursts.")
             default:
                 return s("storage.planTitle", "This is what would go", "The plan sheet's title.")
             }

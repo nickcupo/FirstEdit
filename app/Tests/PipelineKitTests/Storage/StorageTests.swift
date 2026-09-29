@@ -201,6 +201,8 @@ struct StorageActionGateTests {
         #expect(g.reason(.push) == Strings.Storage.pushNothing)
         #expect(g.reason(.pull) == Strings.Storage.pullNothing)
         #expect(g.reason(.drop) == nil)
+        #expect(g.reason(.pack) == nil, "the RAWs are here, so the bursts can be packed")
+        #expect(g.size(.pack).isEmpty, "how much a pack saves is only known once it has run")
         #expect(g.reason(.expire) == Strings.Storage.expireNotDue(365),
                 "the retention lock has not run out, and the reason names how long is left")
     }
@@ -210,6 +212,7 @@ struct StorageActionGateTests {
         let g = StorageActionGate(storage: try StorageFixture.decode(Storage.self, "storage-icloud-only"))
         #expect(g.reason(.pull) == nil)
         #expect(g.reason(.drop) == Strings.Storage.dropNothingHere)
+        #expect(g.reason(.pack) == Strings.Storage.packNothingHere, "packing reads the RAWs, and none are here")
         // The engine does not refuse an archived shoot's cache
         // (tests/test_reclaim.py): every frame it was made from is in iCloud.
         #expect(g.reason(.reclaim) == nil)

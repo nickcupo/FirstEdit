@@ -27,6 +27,10 @@ struct StorageActionGate: Equatable {
             if a.pullable == 0 {
                 return a.up == 0 ? Strings.Storage.nothingInICloud : Strings.Storage.pullNothing
             }
+        case .pack:
+            // Packing reads the RAWs, so it needs them here. Which bursts are
+            // left to pack is the engine's list, drawn when he presses it.
+            if a.here == 0 { return Strings.Storage.packNothingHere }
         case .reclaim:
             // The engine's own refusals are listed in the cache group above
             // the buttons, under a heading that says they are why; this
@@ -58,7 +62,7 @@ struct StorageActionGate: Equatable {
         case .pull: text = storage.archive.pullable_text
         case .drop: text = storage.archive.droppable_text
         case .reclaim: text = storage.cache.bytes_text
-        case .expire: text = ""
+        case .expire, .pack: text = ""
         }
         return reason(action) == nil && text != "0 B" ? text : ""
     }

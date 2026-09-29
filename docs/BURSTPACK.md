@@ -4,6 +4,12 @@ A burst's RAWs kept as the keeper and how the others differ. Lossless: what
 `unpack` writes is the file that was packed, every byte, with its modified
 time. It ships with the engine like every other module in `pipeline/`.
 
+On Finish, the storage panel's **Pack Bursts…** shows which bursts would be
+packed, and packs them when confirmed: each into `packed/burst-<n>.fbp` in the
+shoot folder, with a progress bar and Stop like any storage job. Nothing is
+removed; the RAWs stay in `raw/`. The same thing from a terminal:
+
+    ./pl burstpack shoot <shoot> [--apply]               what Pack Bursts… does
     ./pl burstpack bench <shoot> [--bursts N]             what it would save. Writes nothing
     ./pl burstpack pack <out.fbp> <raw>... [--key NAME]   pack, then prove it unpacks
     ./pl burstpack unpack <archive.fbp> <dir> [NAME...]   put the RAWs back; refuses to overwrite
@@ -66,5 +72,6 @@ frame; roughly double for 24 MP.
 
 - `./pl archive` does not use it. Letting a packed burst stand in for the
   originals in iCloud is a separate decision.
-- No page in the app; it is the command above, bundled with the engine.
+- A packed burst does not yet stand in for its RAWs: Remove the Local RAWs
+  and Copy the RAWs to iCloud still work on the ARWs themselves.
 - Uncompressed ARW and DNG are only xz'd.

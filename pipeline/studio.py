@@ -285,6 +285,7 @@ STAGE_WORDS = {
     "push": ("copying to iCloud", "frames"), "drop": ("removing local originals", "frames"),
     "pull": ("bringing frames back", "frames"), "expire": ("removing from iCloud", "files"),
     "check": ("checking every original", "frames"), "reclaim": ("taking back cache", "files"),
+    "pack": ("packing bursts", "frames"),
 }
 INGEST_WEIGHTS = {"copy": 70, "verify": 30}
 # By what was asked of the copy. Without a check there is no second stage, so
@@ -309,7 +310,7 @@ SETUP_WEIGHTS = {"clip": 100}
 UPDATE_WEIGHTS = {"download": 90, "stage": 10}
 # One stage each: a push is a push. Held as a dict per verb so the bar's
 # arithmetic below is the same for these as it is for a cull.
-STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim")}
+STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack")}
 # By kind, for the jobs that are one stage long and are not storage verbs. An
 # Instagram make was weighed against the cull's table, where "instagram" is
 # not a stage, and its bar sat at 0% until it ended. The planning pass is added
@@ -4003,7 +4004,7 @@ def library() -> dict:
 # page and the terminal could tell him two different stories about the same
 # shoot, and only one of them would be the one that runs.
 
-STOR_VERBS = ("push", "drop", "pull", "expire", "reclaim")
+STOR_VERBS = ("push", "drop", "pull", "expire", "reclaim", "pack")
 
 
 def _s(n: int, one: str, many: str = "") -> str:
@@ -4016,6 +4017,10 @@ def _stor_argv(s: Shoot, what: str, body: dict, apply: bool) -> list[str]:
     """Exactly the command line he would have typed himself."""
     if what == "reclaim":
         cmd = [PY, str(HERE / "reclaim.py"), "reclaim", str(s.folder)]
+    elif what == "pack":
+        # Burstpack: every burst into packed/, each checked frame by frame
+        # before it is kept. It removes nothing, so it sits with push and pull.
+        cmd = [PY, str(HERE / "burstpack.py"), "shoot", str(s.folder)]
     elif what == "check":
         cmd = [PY, str(HERE / "reclaim.py"), "verify", str(s.folder)]
         return cmd + (["--record"] if body.get("record") else [])
@@ -4108,6 +4113,12 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
             label = (f"Remove {_s(counts['files'], 'spare copy', 'spare copies')} from iCloud "
                      f"({bytes_text}). Every one of these frames keeps its original in this shoot.")
         ready = ready and bool(counts.get("files"))
+    elif what == "pack":
+        m = re.search(r"^\s*would pack (\d+) frames in (\d+) bursts, (.+?), into ", text, re.M)
+        if m:
+            counts["frames"], counts["bursts"], bytes_text = int(m.group(1)), int(m.group(2)), m.group(3)
+            label = f"Pack {_s(counts['bursts'], 'burst')} ({_s(counts['frames'], 'frame')})"
+        ready = ready and counts.get("frames", 0) > 0
     elif what == "reclaim":
         m = re.search(r"^\s+(\d+) files\s+(\S+ \S+)\s+total\s*$", text, re.M)
         if m:
@@ -4144,6 +4155,12 @@ def _stor_state(s: Shoot, what: str) -> str:
         keep = amod.keepers_of(s.folder)
         h.update(("|".join(sorted(keep)) if keep is not None else "?no key?").encode())
         h.update(f"|{amod.retention(s.folder)}|{amod.days_since_finished(s.folder)}\n".encode())
+    if what == "pack":
+        # A burst packed since the list was drawn is one the list names and the
+        # run would skip; the list has to be drawn again to say so.
+        packed = s.folder / "packed"
+        for p in sorted(packed.glob("*.fbp")) if packed.is_dir() else []:
+            h.update(f"packed|{p.name}|{p.stat().st_size}\n".encode())
     if what == "reclaim":
         import reclaim as rmod
         sh = rmod.Shoot(s.folder)
@@ -4446,7 +4463,8 @@ STOR_TITLES = {"push": "copying the RAWs of {n} to iCloud",
                "pull": "bringing the RAWs of {n} back",
                "expire": "letting go of the RAWs of {n} in iCloud",
                "reclaim": "taking back {n}'s cache",
-               "check": "checking every original of {n}"}
+               "check": "checking every original of {n}",
+               "pack": "packing the bursts of {n}"}
 
 
 # ------------------------------------------ the list of work he asked for
@@ -4858,7 +4876,8 @@ PLAN_DOES = {"push": "Check what would be copied to iCloud, and show you what it
              "pull": "Check what would come back from iCloud, and show you what it found.",
              "drop": "Check which local RAWs would be removed, and show you what it found.",
              "expire": "Check which RAWs in iCloud would be let go, and show you what it found.",
-             "reclaim": "Check what cache would be taken back, and show you what it found."}
+             "reclaim": "Check what cache would be taken back, and show you what it found.",
+             "pack": "Check which bursts would be packed, and show you what it found."}
 
 
 def _b_plan(what: str):
@@ -4893,6 +4912,7 @@ WORK: dict[str, object] = {
     "plan-drop": _b_plan("drop"),
     "plan-expire": _b_plan("expire"),
     "plan-reclaim": _b_plan("reclaim"),
+    "plan-pack": _b_plan("pack"),
 }
 
 # What may never be put on the list, and the sentence he is told instead.

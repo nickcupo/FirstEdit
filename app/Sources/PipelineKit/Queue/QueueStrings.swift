@@ -60,6 +60,7 @@ extension Strings {
             case "stor-push": return q("queue.what.push", "Copy the RAWs to iCloud", "A piece of work on the list.")
             case "stor-pull": return q("queue.what.pull", "Bring the RAWs back", "A piece of work on the list.")
             case "stor-check": return q("queue.what.check", "Check every original", "A piece of work on the list.")
+            case "stor-pack": return q("queue.what.pack", "Pack the bursts", "A piece of work on the list.")
             // A plan is named for what it checks. All five were "Work out
             // what would go", which a copy to iCloud does not do, while the
             // notification that sent him to the row named the plan itself.
@@ -67,6 +68,7 @@ extension Strings {
             case "plan-pull": return q("queue.what.planPull", "Check what would come back", "A storage plan on the list.")
             case "plan-drop": return q("queue.what.planDrop", "Check what would be removed", "A storage plan on the list.")
             case "plan-expire": return q("queue.what.planExpire", "Check what would be let go", "A storage plan on the list.")
+            case "plan-pack": return q("queue.what.planPack", "Check which bursts would be packed", "A storage plan on the list.")
             case "plan-reclaim":
                 return q("queue.what.planReclaim", "Check what cache would be taken back", "A storage plan on the list.")
             default: return nil

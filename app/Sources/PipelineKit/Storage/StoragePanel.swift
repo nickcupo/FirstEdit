@@ -29,13 +29,13 @@ public struct StoragePanel: View {
     /// take nothing away: they are planned like everything else, and they are
     /// not on the ladder, so they carry none of its weight.
     enum PanelAction: String, Identifiable, Hashable {
-        case push, pull, reclaim, drop, expire
+        case push, pull, pack, reclaim, drop, expire
         var id: String { rawValue }
         var what: String { rawValue }
 
         var rung: Rung? {
             switch self {
-            case .push, .pull: return nil
+            case .push, .pull, .pack: return nil
             case .reclaim, .drop: return .removesACopy
             case .expire: return .deletesPhotographs
             }
@@ -226,13 +226,18 @@ public struct StoragePanel: View {
                     .help(model.isFollowing ? Strings.Storage.waitForTheJob : "")
                     actionButton(.reclaim, Strings.Storage.reclaim)
                 }
+                // Burstpack: every burst into one lossless file beside raw/.
+                // It takes nothing away, so it sits with the copies.
+                GridRow {
+                    actionButton(.pack, Strings.Storage.pack)
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("storage.frequent")
             reasons([(.push, Strings.Storage.push), (.pull, Strings.Storage.pull),
-                     (.reclaim, Strings.Storage.reclaim)])
+                     (.reclaim, Strings.Storage.reclaim), (.pack, Strings.Storage.pack)])
         }
     }
 

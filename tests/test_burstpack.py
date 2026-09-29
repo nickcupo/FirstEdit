@@ -12,6 +12,7 @@ saves on these is not a claim about photographs; docs/BURSTPACK.md has those.
 from __future__ import annotations
 
 import io
+import json
 import os
 import struct
 import sys
@@ -248,3 +249,54 @@ def test_nothing_is_written_over(tmp_path):
         bp.unpack(out, dest, log=lambda *_: None)
     assert (dest / paths[0].name).read_bytes() == b"his"
     assert sorted(p.name for p in dest.iterdir()) == [paths[0].name]
+
+
+# ------------------------------------------------------- a shoot, from Finish
+
+def _shoot(tmp_path: Path) -> Path:
+    """A culled shoot with two bursts (3 and 2 frames), one frame of each kept."""
+    shoot = tmp_path / "photos" / "shoots" / "2026-01-01-lake"
+    frames = _burst(3, seed=4) + _burst(2, seed=5)
+    paths = _files(shoot, frames)
+    rows = ["file,burst,shot_at"] + [f"{p.name},{0 if i < 3 else 1},2026:01:01 10:00:{i:02d}" for i, p in enumerate(paths)]
+    (shoot / "cull").mkdir()
+    (shoot / "cull" / "cull.csv").write_text("\n".join(rows) + "\n")
+    (shoot / "cull" / "selects.json").write_text(json.dumps([paths[1].name, paths[4].name]))
+    return shoot
+
+
+def test_finish_packs_every_burst_and_takes_nothing_away(tmp_path):
+    shoot = _shoot(tmp_path)
+    raws = {p.name: p.read_bytes() for p in (shoot / "raw").iterdir()}
+    said: list[str] = []
+    assert bp.pack_shoot(shoot, apply=False, log=said.append) == 0
+    assert said[0].startswith("would pack 5 frames in 2 bursts, ")
+    assert not (shoot / "packed").exists(), "the list writes nothing"
+    said.clear()
+    assert bp.pack_shoot(shoot, apply=True, log=said.append) == 0
+    assert sorted(p.name for p in (shoot / "packed").iterdir()) == ["burst-0.fbp", "burst-1.fbp"]
+    assert said[-1].startswith("packed ") and "@@ pack 5 5" in said
+    m, _ = bp.read_manifest((shoot / "packed" / "burst-0.fbp").read_bytes())
+    assert m["key"] == "TSC01001.ARW", "the frame he kept is the one stored whole"
+    assert {p.name: p.read_bytes() for p in (shoot / "raw").iterdir()} == raws
+    back = tmp_path / "back"
+    for a in (shoot / "packed").iterdir():
+        bp.unpack(a, back, log=lambda *_: None)
+    assert {p.name: p.read_bytes() for p in back.iterdir()} == raws
+    said.clear()
+    bp.pack_shoot(shoot, apply=False, log=said.append)
+    assert said[0].startswith("every burst of 2026-01-01-lake is already packed")
+
+
+def test_the_finish_page_reads_the_list_the_command_printed(tmp_path):
+    studio = pytest.importorskip("studio")
+    shoot = _shoot(tmp_path)
+    said: list[str] = []
+    bp.pack_shoot(shoot, apply=False, log=said.append)
+    plan = studio._parse_plan("pack", "\n".join(said), {})
+    assert plan["ready"] and plan["counts"]["frames"] == 5 and plan["counts"]["bursts"] == 2
+    assert plan["label"] == "Pack 2 bursts (5 frames)"
+    argv = studio._stor_argv(studio.Shoot(shoot), "pack", {}, apply=True)
+    assert argv[-4:] == [str(Path(studio.HERE) / "burstpack.py"), "shoot", str(shoot), "--apply"]
+    empty = studio._parse_plan("pack", "every burst of x is already packed, in /x/packed", {})
+    assert not empty["ready"] and not empty["label"]

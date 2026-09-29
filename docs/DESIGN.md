@@ -2341,7 +2341,11 @@ original is here; with nothing in iCloud and some not here either, the line ends
 ("· 1,200 of 1,558 on this Mac.").
 
 The frequent actions come first: **Copy the RAWs to iCloud…**, **Bring the RAWs Back…**, **Check Every
-Original**, **Take Back the Cache…**. Then a rule, 32 pt of space, and a group headed **Remove and
+Original**, **Take Back the Cache…**, and on a row of its own **Pack Bursts…** (`burstpack.py`,
+docs/BURSTPACK.md): each burst into one lossless file in `packed/`, the frame he kept stored whole
+and the rest as how they differ, every frame unpacked and checked before the file is kept. It
+removes nothing, so it is off the ladder like a copy, and it is off with a reason only when none of
+the shoot's RAWs are on this Mac. Then a rule, 32 pt of space, and a group headed **Remove and
 delete** holding **Remove the Local RAWs…** and **Let Go of the RAWs in iCloud…** — in the page the
 destructive control sat 12 px above the button he presses at the end of nearly every shoot
 (FLOW-06). The frame-by-frame table stays a lazy disclosure, fetched only on first expand.
