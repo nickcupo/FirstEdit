@@ -114,7 +114,6 @@ public enum Routes {
     public static let updateInstall = Route<OK>(.post, "/api/update/install")
     public static let storageRetain = Route<RetainResult>(.post, "/api/storage/retain")
     public static let storageCheck = Route<OK>(.post, "/api/storage/check")
-    public static let storageUnpack = Route<OK>(.post, "/api/storage/unpack")
     public static let storagePlanDraw = Route<OK>(.post, "/api/storage/plan")
     public static let storageApply = Route<ApplyResult>(.post, "/api/storage/apply")
     public static let learnedRun = Route<OK>(.post, "/api/learned/run")

@@ -4,13 +4,13 @@ A burst's RAWs kept as the keeper and how the others differ. Lossless: what
 `unpack` writes is the file that was packed, every byte, with its modified
 time. It ships with the engine like every other module in `pipeline/`.
 
-On Finish, **Copy to iCloud…** asks which form: *RAW files*, or *Packed,
+On Finish, **Back Up to iCloud…** asks which form: *RAW files*, or *Packed,
 about half the size*. Packed packs each burst the copy is about to send into
 `packed/burst-<n>.fbp` in the shoot (a frame in no burst into
 `packed/frame-<name>.fbp`), checks it, and sends those files instead of the
 ARWs. From a terminal:
 
-    ./pl archive push <shoot> --as packed [--apply]      what Copy to iCloud, Packed, does
+    ./pl archive push <shoot> --as packed [--apply]      what Back Up to iCloud, Packed, does
     ./pl burstpack shoot <shoot> [--apply]               only the packing, into packed/
     ./pl burstpack bench <shoot> [--bursts N]             what it would save. Writes nothing
     ./pl burstpack pack <out.fbp> <raw>... [--key NAME]   pack, then prove it unpacks
@@ -96,37 +96,35 @@ this container's, and has more of them beside it; that has not been measured.
 ## In iCloud
 
 A packed burst is a second form a frame's copy in iCloud can take, beside its
-ARW (`archive.py`, "packed bursts"). The storage panel on Finish, top to bottom:
+ARW (`archive.py`, "packed bursts"). On Finish's storage panel:
 
-- **Copy to iCloud…**, *RAW files* or *Packed*. Packed packs what is to go,
+- **Back Up to iCloud…**, *RAW files* or *Packed*. Packed packs what is to go,
   unpacks each file in memory and matches every frame to its RAW here, copies
   it to `packed/` in the shoot's archive folder and reads the copy back. A
   burst that does not match goes up as its ARWs. A frame already up in either
   form is not sent again. `archive.json` records each file's checksum and
   each frame's.
-- **Bring Back from iCloud…** puts the RAWs back whichever form is up there:
-  a packed frame is unpacked from the shoot's own `packed/` when that file is
-  the one recorded, else from the copy in iCloud, and checked before it takes
-  the RAW's name.
-- **Unpack to a Folder…**, beside it, asks for a folder and unpacks every
-  frame of the shoot's packed bursts - from `packed/`, or from iCloud - into
-  it as the RAW it was, with its name and time (`burstpack.py export`). It
-  never writes over a file, and changes nothing in the shoot or in iCloud.
-- **Check the Packed Bursts**, shown once a shoot has packed bursts, unpacks
-  each in memory and checks every frame against its checksum and the RAW on
-  this Mac. It reads only.
-- **Remove from This Mac…** takes a RAW on the strength of its packed copy
-  only when that copy is in iCloud, downloaded, vouched for by iCloud, matches
-  its record, and unpacks - that very copy - to the exact bytes of the RAW
-  about to be removed. It also takes the shoot's own packed bursts whose
-  identical file is up there. Every other rule of drop still applies.
-- **Remove Copies from iCloud…**, *RAW copies*, *Packed copies* or *Both*
-  (`archive.py trim`), removes a copy up there only when this Mac holds every
-  frame in it as its RAW, the same bytes, checked again just before the copy
-  goes. No frame is left without a copy.
+- **The RAWs come back by themselves.** Culling again, writing the presets or
+  building the PhotoLab folder first puts back into the shoot every RAW that
+  is only in iCloud, from its ARW or its packed burst, each checked against
+  its record (`archive.restore_for_work`). If one cannot come back, the step
+  stops rather than work on part of the shoot. **Bring Back from iCloud…**
+  does the same on its own.
+- **More ▸ Check the Packed Bursts** unpacks each packed burst here in memory
+  and checks every frame against its checksum and the RAW on this Mac. It
+  reads only.
+- **Free Up Space…** asks where. *On this Mac* removes a RAW only when its
+  copy in iCloud is there, downloaded, vouched for by iCloud, matches its
+  record, and - for a packed copy - unpacks, that very copy, to the exact
+  bytes of the RAW; it also takes the shoot's packed bursts whose identical
+  file is up. *In iCloud* removes an ARW or packed copy up there only when
+  this Mac holds every frame in it as its RAW, the same bytes (`archive.py
+  trim`). Either way no frame is left without a checked copy.
 - **Let Go of the RAWs in iCloud…** never touches a packed burst, and keeps
   their record when it rewrites `archive.json` (it used to rewrite the file
   from its ARW records alone).
+- From a terminal, `./pl burstpack export <shoot> <folder>` unpacks every
+  packed frame as its RAW into any folder, never over a file.
 
 ## Not done
 

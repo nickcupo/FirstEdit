@@ -6,7 +6,7 @@ import Foundation
 ///
 /// On a finished shoot that had never been archived — his commonest case —
 /// Bring Back from iCloud, Remove from This Mac and Let Go of the RAWs in iCloud
-/// all looked as live as Copy to iCloud, and each one started a dry
+/// all looked as live as Back Up to iCloud, and each one started a dry
 /// run, waited, and came back with one line: "has no archive manifest". Every
 /// figure this reads is one `GET /api/storage` already carries; nothing here
 /// works out a count of its own.
@@ -48,6 +48,11 @@ struct StorageActionGate: Equatable {
             // Copied up before Finish, the RAWs are still going to be read;
             // the engine refuses the same (`archive.drop`).
             if !r.finished { return Strings.Storage.dropNotFinished }
+        case .free:
+            // Free Up Space asks where; it is off only when neither place has
+            // anything to give, and then it says why this Mac has nothing.
+            let here = reason(.drop), there = reason(.trim)
+            if here != nil && there != nil { return here }
         case .expire:
             if a.up == 0 { return Strings.Storage.nothingInICloud }
             if !r.finished { return Strings.Storage.expireNotFinished }
@@ -63,7 +68,7 @@ struct StorageActionGate: Equatable {
         switch action {
         case .push: text = storage.archive.todo_text
         case .pull: text = storage.archive.pullable_text
-        case .drop: text = storage.archive.droppable_text
+        case .drop, .free: text = storage.archive.droppable_text
         case .reclaim: text = storage.cache.bytes_text
         case .expire, .trim: text = ""
         }

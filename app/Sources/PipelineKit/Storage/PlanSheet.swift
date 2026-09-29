@@ -49,7 +49,8 @@ public struct PlanSheet: View {
         self.model = model
         self.close = close
         _includeOnlyCopies = State(initialValue: includeOnlyCopies)
-        _form = State(initialValue: request.options.form ?? (request.what == "trim" ? "both" : "raw"))
+        _form = State(initialValue: request.options.form
+                      ?? (request.what == "trim" ? "both" : request.what == "free" ? "mac" : "raw"))
     }
 
     /// One choice of form: the engine's word and the one he reads.
@@ -68,6 +69,9 @@ public struct PlanSheet: View {
             return [FormChoice(tag: "raw", label: Strings.Storage.rawCopies),
                     FormChoice(tag: "packed", label: Strings.Storage.packedCopies),
                     FormChoice(tag: "both", label: Strings.Storage.bothCopies)]
+        case "free":
+            return [FormChoice(tag: "mac", label: Strings.Storage.freeOnThisMac),
+                    FormChoice(tag: "icloud", label: Strings.Storage.freeInICloud)]
         default:
             return []
         }
@@ -83,7 +87,12 @@ public struct PlanSheet: View {
                                                     after: request.options.after))
         }
         // A new choice is a new list: the engine draws it again, and the
-        // button is off until it lands.
+        // button is off until it lands. Free Up Space is one of two lists by
+        // its choice: the local RAWs, or the copies in iCloud of both forms.
+        if request.what == "free" {
+            return form == "icloud" ? StorageModel.Request("trim", PlanOptions(form: "both"))
+                                    : StorageModel.Request("drop")
+        }
         return formChoices.isEmpty ? request : StorageModel.Request(request.what, PlanOptions(form: form))
     }
 
@@ -133,13 +142,20 @@ public struct PlanSheet: View {
         VStack(alignment: .leading, spacing: Tokens.Metric.labelValueGap) {
             Text(headline).font(.title3)
             if !formChoices.isEmpty {
-                Picker(request.what == "push" ? Strings.Storage.formPush : Strings.Storage.formTrim,
+                Picker(request.what == "push" ? Strings.Storage.formPush
+                       : request.what == "free" ? Strings.Storage.freeWhere : Strings.Storage.formTrim,
                        selection: $form) {
                     ForEach(formChoices, id: \.tag) { Text($0.label).tag($0.tag) }
                 }
                 .pickerStyle(.segmented)
                 .disabled(model.applying)
                 .accessibilityIdentifier("storage.form")
+                if request.what == "free" {
+                    Text(form == "icloud" ? Strings.Storage.freeInICloudNote : Strings.Storage.freeOnThisMacNote)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if request.what == "push" {
                     Text(Strings.Storage.formPushNote)
                         .font(.footnote)
@@ -156,7 +172,7 @@ public struct PlanSheet: View {
     }
 
     private var headline: String {
-        guard rung == .deletesPhotographs else { return Strings.Storage.planTitle(for: request.what) }
+        guard rung == .deletesPhotographs else { return Strings.Storage.planTitle(for: current.what) }
         // The number in the title is the list's own, and it is the number he
         // has to type. Before a list exists the sheet says what it is doing
         // rather than a count nobody drew.

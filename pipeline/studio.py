@@ -4551,7 +4551,15 @@ def _q_shoot(name: str) -> Shoot:
 
 
 def _q_frames(s: Shoot) -> int:
-    return sum(1 for p in s.raw.iterdir() if p.suffix.lower() in RAW_EXTS) if s.raw.is_dir() else 0
+    """The shoot's photographs: the RAWs here, and when none are, the ones
+    recorded in iCloud, which the cull, the presets and the PhotoLab folder
+    bring back by themselves before they start (archive.restore_for_work)."""
+    here = sum(1 for p in s.raw.iterdir() if p.suffix.lower() in RAW_EXTS) if s.raw.is_dir() else 0
+    if here:
+        return here
+    import archive as amod
+    whole = amod.load_manifest(s.folder)
+    return len({*(whole.get("frames") or {}), *amod.packed_frames(whole)})
 
 
 def _q_burst(o: dict) -> str:
@@ -4900,7 +4908,7 @@ def _b_stor(what: str):
         # Finish, and that is never on the list (NEVER_QUEUED).
         verb = "check" if what == "check" else what
         return {"title": STOR_TITLES[verb].format(n=name),
-                "does": {"push": "Copy to iCloud and read every one of them back.",
+                "does": {"push": "Back Up to iCloud and read every one of them back.",
                          "pull": "Bring the RAWs back down from iCloud.",
                          "check": "Read every original back off the disk and check it."}[verb],
                 "cmd": _stor_argv(s, verb, o, apply=(verb != "check")),

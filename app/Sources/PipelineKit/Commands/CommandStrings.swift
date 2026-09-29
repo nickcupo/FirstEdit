@@ -231,7 +231,7 @@ public enum Words {
         public static var stopJob: String { s("command.stopJob", "Stop What Is Running", "Menu item, ⌘.") }
         public static var storage: String { s("command.storage", "Storage", "A submenu.") }
         public static var copyUp: String {
-            s("command.copyUp", "Copy to iCloud…", "Storage submenu.")
+            s("command.copyUp", "Back Up to iCloud…", "Storage submenu.")
         }
         public static var bringBack: String {
             s("command.bringBack", "Bring Back from iCloud…", "Storage submenu.")

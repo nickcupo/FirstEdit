@@ -28,7 +28,7 @@ extension Strings {
         // MARK: the frequent actions, first and together
 
         public static var push: String {
-            s("storage.push", "Copy to iCloud…",
+            s("storage.push", "Back Up to iCloud…",
               "A frequent action. The ellipsis is the plan sheet, as in Shoot ▸ Storage.")
         }
         public static var pull: String {
@@ -38,19 +38,19 @@ extension Strings {
         // MARK: which form
 
         public static var formPush: String {
-            s("storage.formPush", "Copy them as", "The label of the choice on Copy to iCloud's sheet.")
+            s("storage.formPush", "Copy them as", "The label of the choice on Back Up to iCloud's sheet.")
         }
         public static var asRAW: String {
-            s("storage.asRAW", "RAW files", "Copy to iCloud's choice: the ARWs as they are.")
+            s("storage.asRAW", "RAW files", "Back Up to iCloud's choice: the ARWs as they are.")
         }
         public static var asPacked: String {
             s("storage.asPacked", "Packed, about half the size",
-              "Copy to iCloud's choice: each burst packed losslessly into one file first.")
+              "Back Up to iCloud's choice: each burst packed losslessly into one file first.")
         }
         public static var formPushNote: String {
             s("storage.formPushNote",
               "Packed keeps every byte: each burst is stored as the frame you kept and how the others differ, and every frame is unpacked and checked against its RAW before anything is copied. Bring Back from iCloud unpacks them.",
-              "Under the choice on Copy to iCloud's sheet.")
+              "Under the choice on Back Up to iCloud's sheet.")
         }
         public static var formTrim: String {
             s("storage.formTrim", "Remove", "The label of the choice on Remove Copies from iCloud's sheet.")
@@ -65,7 +65,7 @@ extension Strings {
             s("storage.bothCopies", "Both", "Remove Copies from iCloud's choice.")
         }
         /// An action's name with the engine's own figure for what it would
-        /// carry: "Copy to iCloud (36.3 GB)…".
+        /// carry: "Back Up to iCloud (36.3 GB)…".
         public static func sized(_ name: String, _ size: String) -> String {
             guard !size.isEmpty else { return name }
             let bare = name.hasSuffix("…") ? String(name.dropLast()) : name
@@ -84,7 +84,7 @@ extension Strings {
         }
         public static var pushNothing: String {
             s("storage.pushNothing", "Nothing on this Mac is waiting to be copied to iCloud.",
-              "Why Copy to iCloud is off.")
+              "Why Back Up to iCloud is off.")
         }
         public static var nothingInICloud: String {
             s("storage.nothingInICloud", "Nothing of this shoot is in iCloud.",
@@ -99,22 +99,28 @@ extension Strings {
               "Unpacks every packed burst in memory and checks each frame against its checksum and the RAW on this Mac. Nothing is written.",
               "The help tag of Check the Packed Bursts.")
         }
-        public static var unpackToFolder: String {
-            s("storage.unpackToFolder", "Unpack to a Folder…",
-              "Puts every packed burst's frames, as RAWs, into a folder he chooses. The ellipsis is the folder panel.")
+        public static var more: String { s("storage.more", "More", "A menu: the checks and the cache.") }
+        public static var comesBackItself: String {
+            s("storage.comesBackItself",
+              "RAWs that are only in iCloud come back by themselves when you cull again, write the presets or build the PhotoLab folder.",
+              "Under Back Up to iCloud and Bring Back from iCloud.")
         }
-        public static var unpackHelp: String {
-            s("storage.unpackHelp",
-              "Unpacks every frame of this shoot's packed bursts, here or in iCloud, as its original RAW into a folder you choose. Nothing is written over, and nothing in the shoot or in iCloud changes.",
-              "The help tag of Unpack to a Folder.")
+        public static var freeUp: String {
+            s("storage.freeUp", "Free Up Space…",
+              "Removes one copy where another is checked: on this Mac, or in iCloud. The ellipsis is the plan sheet.")
         }
-        public static var unpackHere: String {
-            s("storage.unpackHere", "Unpack Here", "The folder panel's button for Unpack to a Folder.")
+        public static var freeWhere: String { s("storage.freeWhere", "Remove the copies", "Free Up Space's choice.") }
+        public static var freeOnThisMac: String { s("storage.freeOnThisMac", "On this Mac", "Free Up Space's choice.") }
+        public static var freeInICloud: String { s("storage.freeInICloud", "In iCloud", "Free Up Space's choice.") }
+        public static var freeOnThisMacNote: String {
+            s("storage.freeOnThisMacNote",
+              "Only RAWs whose copy in iCloud has been read back and checked. They come back by themselves when you work on the shoot again.",
+              "Under Free Up Space's choice, On this Mac.")
         }
-        public static func unpackMessage(_ shoot: String) -> String {
-            String(localized: "storage.unpackMessage",
-                   defaultValue: "Choose where to put the RAWs of \(shoot). A file already there is never written over.",
-                   comment: "The folder panel's message for Unpack to a Folder.")
+        public static var freeInICloudNote: String {
+            s("storage.freeInICloudNote",
+              "Only copies whose RAWs are on this Mac, the same bytes, as ARWs or packed. Every frame keeps its RAW here.",
+              "Under Free Up Space's choice, In iCloud.")
         }
         public static var trimNothingHere: String {
             s("storage.trimNothingHere", "None of its RAWs are on this Mac, so every copy in iCloud is still needed.",
@@ -243,7 +249,7 @@ extension Strings {
             switch what {
             case "push":
                 return s("storage.planTitle.push", "This is what would be copied to iCloud",
-                         "The plan sheet's title for Copy to iCloud.")
+                         "The plan sheet's title for Back Up to iCloud.")
             case "pull":
                 return s("storage.planTitle.pull", "This is what would be brought back",
                          "The plan sheet's title for Bring Back from iCloud.")

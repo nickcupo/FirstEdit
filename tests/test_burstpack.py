@@ -624,3 +624,29 @@ def test_packed_bursts_unpack_into_any_folder_and_never_over_a_file(tmp_path, mo
     assert (out / "TSC01001.ARW").read_bytes() == b"his own", "a different file of that name is left alone"
     assert (out / "TSC01002.ARW").read_bytes() == raws["TSC01002.ARW"]
     assert not list(out.glob(".*.tmp"))
+
+
+def test_raws_come_back_by_themselves_before_work_that_reads_them(tmp_path, monkeypatch, capsys):
+    """Cull, presets and the PhotoLab folder call this first: a shoot whose
+    RAWs left this Mac is worked on as though they never had."""
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    assert archive.restore_for_work(shoot) == 0
+    assert "bringing them back" not in capsys.readouterr().out, "nothing to do when every RAW is here"
+    archive.push(shoot, apply=True, form="packed")
+    archive.drop(shoot, apply=True)
+    assert not list((shoot / "raw").iterdir())
+    studio = pytest.importorskip("studio")
+    assert studio._q_frames(studio.Shoot(shoot)) == 5, "the steps still see a shoot of five photographs"
+    assert archive.restore_for_work(shoot / "raw") == 0
+    assert {p.name: p.read_bytes() for p in (shoot / "raw").iterdir()} == raws
+
+
+def test_work_stops_when_a_raw_cannot_come_back(tmp_path, monkeypatch, capsys):
+    import archive
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    archive.push(shoot, apply=True, form="packed")
+    archive.drop(shoot, apply=True)
+    archive.packed_dest(shoot, "burst-1.fbp").unlink()
+    assert archive.restore_for_work(shoot) == 1
+    assert "could not be brought back" in capsys.readouterr().out

@@ -2340,17 +2340,19 @@ the state row, not a second time at the end of the line. That clause is dropped 
 original is here; with nothing in iCloud and some not here either, the line ends on how many are
 ("· 1,200 of 1,558 on this Mac.").
 
-The frequent actions come first: **Copy to iCloud…**, **Bring Back from iCloud…**, **Check Every
-Original**, **Take Back the Cache…**. Copy to iCloud's sheet asks the form, *RAW files* or
-*Packed, about half the size* (`burstpack.py`, docs/BURSTPACK.md), and a packed burst in iCloud is
-a copy push, drop and pull all accept. Once a shoot has packed bursts, **Check the Packed Bursts**
-sits on a row of its own with **Unpack to a Folder…**; the first unpacks each in memory, checks it,
-and reads only, the second writes every packed frame as its RAW into a folder he picks and never
-over a file. Then a rule, 32 pt of space, and a group headed **Remove and
-delete** holding **Remove from This Mac…** and **Remove Copies from iCloud…** on one row (each
-removes one copy and keeps a checked one; the second's sheet asks *RAW copies*, *Packed copies* or
-*Both*, and takes a copy up there only when this Mac holds its RAWs, the same bytes), and **Let Go
-of the RAWs in iCloud…** on the next — in the page the
+The frequent actions come first, and there are two of them and a menu: **Back Up to iCloud…**,
+whose sheet asks the form, *RAW files* or *Packed, about half the size* (`burstpack.py`,
+docs/BURSTPACK.md), and **Bring Back from iCloud…**, with **More** holding **Check Every
+Original**, **Check the Packed Bursts** once a shoot has some, and **Take Back the Cache…**. Under
+them, once anything is up, one line says what makes bringing back rarely needed: the cull, the
+presets and the PhotoLab folder bring any RAW that is only in iCloud back by themselves, checked,
+before they start (`archive.restore_for_work`), and stop rather than work on part of a shoot. A
+packed burst in iCloud is a copy push, drop and pull all accept. Then a rule, 32 pt of space, and a
+group headed **Remove and delete** holding **Free Up Space…** and **Let Go of the RAWs in
+iCloud…**. Free Up Space's sheet asks where, *On this Mac* (drop: the RAWs whose copy up there is
+checked, and the shoot's packed bursts whose identical file is up) or *In iCloud* (trim: the copies
+up there, ARW or packed, whose RAWs are here, the same bytes), and is that engine list; each keeps a
+checked copy of every frame. Let Go is the one that can leave a frame with none — in the page the
 destructive control sat 12 px above the button he presses at the end of nearly every shoot
 (FLOW-06). The frame-by-frame table stays a lazy disclosure, fetched only on first expand.
 
@@ -2359,7 +2361,7 @@ engine's own counts in `/api/storage` — `archive.todo`, `pullable`, `droppable
 retention lock's `finished` / `due` / `due_in_days` — and the reason is in its help and in a footnote
 under its group ("Bring Back from iCloud: Nothing of this shoot is in iCloud."). Where the way on is a
 button on the same page, the reason names it: Remove from This Mac on a shoot not yet finished says
-"… Press Finish This Shoot first." **Copy to iCloud works before Finish**, the same night,
+"… Press Finish This Shoot first." **Back Up to iCloud works before Finish**, the same night,
 when he presses it: it copies and reads back and takes nothing away, here or there, and a backup
 before the card is formatted for the next shoot is the point of it. It refused any shoot not marked
 finished, days before he had finished editing, and the refusal pointed at the retired studio and a
@@ -2371,7 +2373,7 @@ makes no folder and records nothing, and says so in the app's words, with no pat
 not turned on on this Mac, so nothing was done. Turn it on in System Settings, then try again." On a finished shoot
 that was never archived, his commonest case, three of the six buttons each used to start a dry run,
 wait, and come back with one line: "has no archive manifest". A button that would do something
-carries the engine's figure for what it would move: **Copy to iCloud (36.3 GB)…**.
+carries the engine's figure for what it would move: **Back Up to iCloud (36.3 GB)…**.
 
 A three-rung ladder, chosen by what cannot be undone:
 
@@ -2811,7 +2813,7 @@ pages are the way in, and Advanced can show them again.
   stops refusing." — the storage panel's sentence under its own lock, word for word, where the two
   had said it two ways. "Copy new shoots to iCloud" is gone: nothing read it, so he could turn it on
   and believe each night's card was backed up while nothing was, and nothing uploads by itself. A
-  copy up is his press of Copy to iCloud, which works the night of the shoot (§2.8). The "Archived
+  copy up is his press of Back Up to iCloud, which works the night of the shoot (§2.8). The "Archived
   copies go to" row is gone: its Choose… saved nothing and nothing read it, under "Not set. The
   engine uses its own default." It comes back when the engine takes a destination from the app.
 - **Learning** — "Learn from finished shoots automatically" (on); "Only when the Mac is idle" (on);

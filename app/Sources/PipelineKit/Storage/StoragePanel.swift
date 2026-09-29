@@ -29,14 +29,17 @@ public struct StoragePanel: View {
     /// take nothing away: they are planned like everything else, and they are
     /// not on the ladder, so they carry none of its weight.
     enum PanelAction: String, Identifiable, Hashable {
-        case push, pull, reclaim, drop, trim, expire
+        /// `free` is Free Up Space: one sheet that asks where, and is drop
+        /// ("On this Mac") or trim ("In iCloud") by the answer. `drop` and
+        /// `trim` are still actions of their own for the menu and the gate.
+        case push, pull, reclaim, drop, trim, free, expire
         var id: String { rawValue }
         var what: String { rawValue }
 
         var rung: Rung? {
             switch self {
             case .push, .pull: return nil
-            case .reclaim, .drop, .trim: return .removesACopy
+            case .reclaim, .drop, .trim, .free: return .removesACopy
             case .expire: return .deletesPhotographs
             }
         }
@@ -105,6 +108,12 @@ public struct StoragePanel: View {
         .sheet(item: $sheet) { action in
             if action == .expire {
                 ExpireSheet(shoot: shoot, model: model) { sheet = nil }
+            } else if action == .free {
+                // On this Mac when there is something here to free, else in iCloud.
+                PlanSheet(rung: .removesACopy,
+                          request: StorageModel.Request("free",
+                                                        PlanOptions(form: gate?.reason(.drop) == nil ? "mac" : "icloud")),
+                          model: model) { sheet = nil }
             } else {
                 PlanSheet(rung: action.rung, request: StorageModel.Request(action.what),
                           model: model) { sheet = nil }
@@ -209,51 +218,49 @@ public struct StoragePanel: View {
 
     private var frequentActions: some View {
         Section {
-            // Two rows of two, not one row of four: at the 680 pt column the
-            // four side by side are 704 pt and the outer two lose their last
-            // words to an ellipsis.
-            Grid(alignment: .leading, horizontalSpacing: Tokens.Metric.relatedGap,
-                 verticalSpacing: Tokens.Metric.relatedGap) {
-                GridRow {
-                    actionButton(.push, Strings.Storage.push)
-                    actionButton(.pull, Strings.Storage.pull)
-                }
-                GridRow {
-                    Button(Strings.Storage.check) {
-                        Task { _ = await model.checkEveryOriginal() }
-                    }
-                    .disabled(model.isFollowing)
-                    .help(model.isFollowing ? Strings.Storage.waitForTheJob : "")
-                    actionButton(.reclaim, Strings.Storage.reclaim)
-                }
-                // Only once there is something packed: a packed burst is made
-                // by Copy to iCloud, when he chooses Packed. Checking needs
-                // one on this Mac; unpacking takes them from here or iCloud.
-                if let a = model.storage?.archive, a.packed_here + a.packed_up > 0 {
-                    GridRow {
-                        Button(Strings.Storage.checkPacked) {
-                            Task { _ = await model.checkPackedBursts() }
-                        }
-                        .disabled(model.isFollowing || a.packed_here == 0)
-                        .help(model.isFollowing ? Strings.Storage.waitForTheJob : Strings.Storage.checkPackedHelp)
-                        .accessibilityIdentifier("storage.checkPacked")
-                        Button(Strings.Storage.unpackToFolder) {
-                            guard let folder = UnpackFolderPicker.pick(shoot: shoot) else { return }
-                            Task { _ = await model.unpackPackedBursts(to: folder) }
-                        }
-                        .disabled(model.isFollowing)
-                        .help(model.isFollowing ? Strings.Storage.waitForTheJob : Strings.Storage.unpackHelp)
-                        .accessibilityIdentifier("storage.unpackToFolder")
-                    }
-                }
+            // Two buttons and a menu. Backing up and bringing back are what he
+            // does; the checks and the cache are there when he wants them, and
+            // bringing back is rarely needed at all: the cull, the presets and
+            // the PhotoLab folder bring the RAWs back by themselves.
+            HStack(spacing: Tokens.Metric.relatedGap) {
+                actionButton(.push, Strings.Storage.push)
+                actionButton(.pull, Strings.Storage.pull)
+                moreMenu
+                Spacer(minLength: 0)
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("storage.frequent")
-            reasons([(.push, Strings.Storage.push), (.pull, Strings.Storage.pull),
-                     (.reclaim, Strings.Storage.reclaim)])
+            if (model.storage?.archive.up ?? 0) > 0 {
+                Text(Strings.Storage.comesBackItself)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            reasons([(.push, Strings.Storage.push), (.pull, Strings.Storage.pull)])
         }
+    }
+
+    /// The checks and the cache, out of the way until they are wanted.
+    private var moreMenu: some View {
+        Menu(Strings.Storage.more) {
+            Button(Strings.Storage.check) {
+                Task { _ = await model.checkEveryOriginal() }
+            }
+            if (model.storage?.archive.packed_here ?? 0) > 0 {
+                Button(Strings.Storage.checkPacked) {
+                    Task { _ = await model.checkPackedBursts() }
+                }
+            }
+            Button(Strings.Storage.sized(Strings.Storage.reclaim, gate?.size(.reclaim) ?? "")) {
+                sheet = .reclaim
+            }
+            .disabled(gate?.reason(.reclaim) != nil)
+        }
+        .fixedSize()
+        .disabled(model.isFollowing)
+        .help(model.isFollowing ? Strings.Storage.waitForTheJob : "")
+        .accessibilityIdentifier("storage.more")
     }
 
     // MARK: a button that can do nothing says why
@@ -340,24 +347,13 @@ public struct StoragePanel: View {
             // engine's own list first, which is what the ellipsis says. The
             // red is on the button inside that sheet, where the consequence
             // is written out.
-            // Two rows, as above: the three side by side, with a size on
-            // the first, are wider than the column. The two that each remove
-            // one copy while another is kept share the first row; the one
-            // that can leave a frame with none has the second to itself.
-            Grid(alignment: .leading, horizontalSpacing: Tokens.Metric.groupGap,
-                 verticalSpacing: Tokens.Metric.relatedGap) {
-                GridRow {
-                    actionButton(.drop, Strings.Storage.drop)
-                    actionButton(.trim, Strings.Storage.trim)
-                }
-                GridRow {
-                    actionButton(.expire, Strings.Storage.expire)
-                }
+            HStack(spacing: Tokens.Metric.groupGap) {
+                actionButton(.free, Strings.Storage.freeUp)
+                actionButton(.expire, Strings.Storage.expire)
+                Spacer(minLength: 0)
             }
             .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            reasons([(.drop, Strings.Storage.drop), (.trim, Strings.Storage.trim),
-                     (.expire, Strings.Storage.expire)])
+            reasons([(.free, Strings.Storage.freeUp), (.expire, Strings.Storage.expire)])
             Text(Strings.Storage.neverDeletesFolder)
                 .font(.footnote)
                 .foregroundStyle(.secondary)

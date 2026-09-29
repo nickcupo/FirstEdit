@@ -4009,6 +4009,11 @@ def main() -> int:
     if not (out / "cull.csv").exists():
         print(f"no cull.csv in {out}; run the cull first (./pl cull {p.raw} --keep-previews)")
         return 1
+    # The starting edit is measured on the RAWs: any moved off this Mac come
+    # back first (archive.restore_for_work), checked, as though never gone.
+    import archive
+    if archive.restore_for_work(p.shoot):
+        return 1
     rep = build(p.raw, out, install=a.install, xmp=a.xmp, dop=a.dop, force=a.force, crop=a.crop, level=a.level,
                 picks_only=a.picks_only, editor=a.editor, mine_too=a.mine_too)
     print(f"\n  {len(rep)} presets in {out / 'presets'}; notes in {out / 'presets.md'}")

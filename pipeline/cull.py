@@ -1063,6 +1063,16 @@ def main() -> int:
     if not given.is_dir():
         print(f"Not a folder: {given}", file=sys.stderr)
         return 1
+    # RAWs moved off this Mac come back before anything is read, so a shoot
+    # culled again is culled on every frame it had. Not for a dry run, and not
+    # for a cull of cached decodes (--previews), which is what that is for.
+    if not args.dry_run and args.previews is None:
+        import archive
+        try:
+            if archive.restore_for_work(given):
+                return 1
+        except library.NotAShoot:
+            pass
     # The frames are the shoot's RAW folder whichever of its folders was named
     # (library.paths): <shoot>/raw when it has one, else the shoot itself. The
     # studio and the docs hand this <shoot>/raw and a flat shoot is handed as

@@ -4,7 +4,7 @@ import Foundation
 ///
 /// "Job" is ours, not his. The engine calls a piece of work a job because a
 /// job is what a process is; on screen it is the thing he already calls it —
-/// **Cull**, **Write the presets**, **Copy to iCloud** — and the
+/// **Cull**, **Write the presets**, **Back Up to iCloud** — and the
 /// list is a list of work, not a queue of jobs. DESIGN.md §2.13's table is
 /// the source of every word in `what(_:)`, and where the app has no word for
 /// a kind the engine's own title is printed rather than a guess.
@@ -57,11 +57,10 @@ extension Strings {
             case "spread": return q("queue.what.spread", "Write presets for the burst", "A piece of work on the list.")
             case "reel": return q("queue.what.reel", "Cut a reel", "A piece of work on the list.")
             case "instagram": return q("queue.what.instagram", "Make the Instagram copies", "A piece of work on the list.")
-            case "stor-push": return q("queue.what.push", "Copy to iCloud", "A piece of work on the list.")
+            case "stor-push": return q("queue.what.push", "Back Up to iCloud", "A piece of work on the list.")
             case "stor-pull": return q("queue.what.pull", "Bring back from iCloud", "A piece of work on the list.")
             case "stor-check": return q("queue.what.check", "Check every original", "A piece of work on the list.")
             case "stor-checkpacked": return q("queue.what.checkPacked", "Check the packed bursts", "A piece of work on the list.")
-            case "stor-unpack": return q("queue.what.unpack", "Unpack to a folder", "A piece of work on the list.")
             // A plan is named for what it checks. All five were "Work out
             // what would go", which a copy to iCloud does not do, while the
             // notification that sent him to the row named the plan itself.

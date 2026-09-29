@@ -6,7 +6,7 @@ import Testing
 
 /// The panel follows the job it started, and reads itself again when it ends.
 ///
-/// The bug: he pressed Copy to iCloud, confirmed 36 GB, and when the
+/// The bug: he pressed Back Up to iCloud, confirmed 36 GB, and when the
 /// copy finished the panel still said "nothing in iCloud · one copy". It was
 /// loaded once, when it appeared; `reloadAfterJob` existed and nothing called
 /// it. Check Every Original started a job and threw its answer away, so its

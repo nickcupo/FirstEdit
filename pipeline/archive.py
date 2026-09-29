@@ -724,7 +724,7 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
         if ok:
             said += " iCloud still has to upload them, and Remove from This Mac takes none until it has."
         if failed:
-            said += f" Copy to iCloud again copies the {failed} that failed."
+            said += f" Back Up to iCloud again copies the {failed} that failed."
         print(f"\n  {said}")
         return 0 if not failed else 1
     print(f"\n  {ok} copied and verified, {failed} failed.")
@@ -1384,6 +1384,34 @@ def expire(shoot: Path, apply: bool, after: int | None, include_keepers: bool,
     if kept:
         print(f"  {kept} left alone because they changed after they were checked")
     return 0
+
+
+def restore_for_work(shoot: Path) -> int:
+    """Before a step that reads the RAWs - the cull, the presets, the
+    PhotoLab folder - every frame recorded as archived whose RAW is not on
+    this Mac is put back into the shoot, from its copy in iCloud or its
+    packed burst, checked as Bring Back from iCloud checks it. So a shoot
+    whose RAWs were moved off this Mac is culled and edited again as though
+    they had never left, with no step of his own first.
+
+    0 when every RAW is here, or has come back; else the step stops, because
+    a cull of part of a shoot would write its verdicts over the frames it
+    could not see."""
+    shoot = library.paths(Path(shoot).expanduser().resolve()).shoot
+    raw, _ = parts(shoot)
+    whole = load_manifest(shoot)
+    missing = sorted(n for n in {*(whole.get("frames") or {}), *packed_frames(whole)} if not local(raw / n))
+    if not missing:
+        return 0
+    print(f"  {len(missing)} RAWs of {shoot.name} are not on this Mac; bringing them back first, each checked",
+          flush=True)
+    rc = pull(shoot, apply=True)
+    left = [n for n in missing if not local(raw / n)]
+    if left:
+        print(f"  {len(left)} RAWs could not be brought back ({left[0]} first), so nothing else was done."
+              " Its copy in iCloud has to be reachable; try again when it is.", flush=True)
+        return 1
+    return rc
 
 
 def trim(shoot: Path, apply: bool, form: str = "both") -> int:

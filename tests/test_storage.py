@@ -561,7 +561,7 @@ def _no_terminal_in(line: str, tmp_path: Path) -> None:
 
 
 def test_after_a_storage_job_the_panel_is_told_the_result_in_its_own_words(tmp_path, monkeypatch, capsys):
-    """After Copy to iCloud the panel said `./pl archive drop` and his
+    """After Back Up to iCloud the panel said `./pl archive drop` and his
     whole home path; after Remove from This Mac, `./pl archive pull … --apply`;
     after Take Back the Cache, "…this command works again." in lower case. The
     studio marks every job it starts, and the last line is then the result,
@@ -668,7 +668,7 @@ def _everything_in(shoot: Path) -> dict[str, tuple[int, str, int]]:
 
 
 def test_a_shoot_not_finished_is_copied_up_and_nothing_here_is_removed(tmp_path, monkeypatch, capsys):
-    """Copy to iCloud the same night, before Finish: a backup before
+    """Back Up to iCloud the same night, before Finish: a backup before
     the card is formatted for the next shoot. It copies and reads back, and
     every file of the shoot is where it was, byte for byte, with the same
     names on the same bytes. It used to refuse any shoot not marked finished."""
