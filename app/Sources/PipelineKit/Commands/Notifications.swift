@@ -296,8 +296,11 @@ public enum JobWords {
     /// Every word capitalised but the small ones inside the title; a word
     /// with a capital already in it (PhotoLab, RAWs, iCloud) is left alone.
     nonisolated static func titleCase(_ s: String) -> String {
-        let small: Set<String> = ["a", "an", "and", "as", "at", "by", "for", "in", "into", "of", "on", "or",
-                                  "the", "to", "with"]
+        // The menu's own list (CommandTable.titleCase): a notification names
+        // the work in the words of the item that started it, "Bring Back from
+        // iCloud" in both, not "From" in one of them.
+        let small: Set<String> = ["a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "of",
+                                  "on", "or", "the", "to", "with"]
         let words = s.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
         return words.enumerated().map { i, w in
             guard w == w.lowercased(), let first = w.first else { return w }
