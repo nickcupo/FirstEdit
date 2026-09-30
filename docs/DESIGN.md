@@ -2341,7 +2341,7 @@ original is here; with nothing in iCloud and some not here either, the line ends
 ("· 1,200 of 1,558 on this Mac.").
 
 The frequent actions come first, and there are two of them and a menu: **Back Up to iCloud…**,
-whose sheet asks the form, *RAW files* or *Packed, about half the size* (`burstpack.py`,
+whose sheet asks the form, *RAW files* or *Packed, smaller, every byte kept* (`burstpack.py`,
 docs/BURSTPACK.md), and **Bring Back from iCloud…**, with **More** holding **Check Every
 Original**, **Check the Packed Bursts** once a shoot has some, and **Take Back the Cache…**. Under
 them, once anything is up, one line says what makes bringing back rarely needed: the cull, the

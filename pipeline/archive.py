@@ -7,7 +7,7 @@ archive.py - a shoot's RAWs, kept in iCloud Drive.
     ./pl archive push <shoot> [--as raw|packed] [--apply]
                                             copy the originals up and verify them, the night of the
                                             shoot or any time after, as ARWs or packed bursts
-                                            (burstpack.py, about half the size). Deletes nothing.
+                                            (burstpack.py, smaller, lossless). Deletes nothing.
     ./pl archive drop <shoot> [--apply]     remove local originals that are provably in iCloud, once
                                             the shoot is finished
     ./pl archive pull <shoot> [--apply]     bring them back down
@@ -419,7 +419,7 @@ def dest_for(shoot: Path, name: str) -> Path:
 #
 # A burst packed on the Finish page (burstpack.py) is a second form a frame's
 # copy in iCloud can take: packed/<burst>.roll in the shoot's archive folder,
-# holding every frame of the burst losslessly, at about half the size. push
+# holding every frame of the burst losslessly, in less space. push
 # sends it instead of the burst's ARWs; drop and pull accept it as the copy.
 #
 # The record is archive.json's "packed": for each file its bytes and SHA-256,
@@ -534,8 +534,9 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
     so a line typed from habit is not an error, and means nothing now.
 
     `form` is what goes up: "raw", the ARWs as they are, or "packed", each
-    burst packed first (burstpack.py) and sent as one file of about half the
-    size. A frame already up in either form is not sent again."""
+    burst packed first (burstpack.py) and sent as one smaller file (57-88% of
+    its RAWs on real a6500 shoots, by the light). A frame already up in either
+    form is not sent again."""
     shoot = Path(shoot).expanduser().resolve()
     bad = icloud_ready()
     if bad:
@@ -592,7 +593,7 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
     print(f"  {shoot.name}: {len(frames)} originals, {already} already up")
     print(f"  would copy {len(todo)} frames, {human(total)}, to {dest_for(shoot, '').parent}")
     if todo and form == "packed":
-        print("  packed first, each burst into one file of about half its size (burstpack), and each")
+        print("  packed first, each burst into one smaller file (burstpack), and each")
         print("  file unpacked and checked against its RAWs before it is copied")
     if not todo:
         print("  nothing to do.")

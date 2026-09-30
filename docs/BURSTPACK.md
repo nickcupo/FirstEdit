@@ -7,8 +7,8 @@ A burst's RAWs kept as the keeper and how the others differ. Lossless: what
 `unpack` writes is the file that was packed, every byte, with its modified
 time. It ships with the engine like every other module in `pipeline/`.
 
-On Finish, **Back Up to iCloud…** asks which form: *Packed, about half the
-size*, which is chosen to begin with, or *RAW files*. Packed packs each burst the copy is about to send into
+On Finish, **Back Up to iCloud…** asks which form: *Packed, smaller, every
+byte kept*, which is chosen to begin with, or *RAW files*. Packed packs each burst the copy is about to send into
 `packed/burst-<n>.roll` in the shoot (a frame in no burst into
 `packed/frame-<name>.roll`), checks it, and sends those files instead of the
 ARWs. From a terminal:
@@ -50,8 +50,26 @@ uncompressed ARW) is stored with xz.
 
 ## Measured
 
-No a6500 files were available when this was written. The numbers are five
-real hand-held bursts from Google's HDR+ dataset (Pixel sensor, 12 MP, 5
+On three real a6500 shoots (compressed ARW, about 24 MB a frame), every
+burst packed and checked:
+
+| Shoot | Frames | RAWs | Packed |
+|---|---|---|---|
+| A short shoot | 29 | 0.68 GB | 57% |
+| Outdoors, overcast | 850 | 19.8 GB | 73% |
+| Indoors, a dim gym | 649 | 15.1 GB | 88% |
+| All three | 1,528 | 35.6 GB | 79% |
+
+The light decides it: noise is what cannot be predicted, and a dim,
+high-ISO frame is mostly noise. The burst adds little on these files: a frame
+coded from its neighbour came to 73% outdoors against 75% for one coded
+alone, and 88% for both indoors, and bursts of 2 frames and of 9 or more
+packed alike. What the neighbour predicts is the picture, and once each
+frame's own pixels have predicted that, what remains is noise, which no other
+frame shares; hand-held shake and moving subjects take a little more.
+
+The first measurements, below, were made before any a6500 files were
+available: five real hand-held bursts from Google's HDR+ dataset (Pixel sensor, 12 MP, 5
 frames each, 310 MB), their sensor data put into Sony's cRAW block format by
 the tests' encoder (`tests/burstpack_hdrplus.py` reproduces them).
 
