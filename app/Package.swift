@@ -35,9 +35,19 @@ let package = Package(
         // the extension's binary; app/build.sh puts it in
         // Contents/PlugIns/RollThumbnail.appex. Swift 5 mode for it alone:
         // QuickLook's callbacks are not annotated for Swift 6 yet.
+        //
+        // It starts in NSExtensionMain, as Xcode's extensions do (-e), and has
+        // no symbol called main: NSExtensionMain calls the executable's main
+        // once the extension is up, so a main that called NSExtensionMain
+        // itself went round until the stack ran out. Swift's top-level code is
+        // renamed out of the way instead.
         .target(name: "RollPreview"),
         .executableTarget(name: "RollThumbnail", dependencies: ["RollPreview"],
-                          swiftSettings: [.swiftLanguageMode(.v5)]),
+                          swiftSettings: [.swiftLanguageMode(.v5),
+                                          .unsafeFlags(["-Xfrontend", "-entry-point-function-name",
+                                                        "-Xfrontend", "roll_thumbnail_unused_main"])],
+                          linkerSettings: [.unsafeFlags(["-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
+                                                         "-Xlinker", "-application_extension"])]),
         .testTarget(
             name: "PipelineKitTests",
             dependencies: ["PipelineKit", "RollPreview"],
