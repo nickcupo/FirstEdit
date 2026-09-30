@@ -780,6 +780,27 @@ def test_every_packed_burst_written_is_given_its_icon(tmp_path, monkeypatch):
     assert sorted(up) == [".burst-0.roll.part", ".burst-1.roll.part"], "and each copy up, before it takes its name"
 
 
+def test_bursts_are_recorded_as_they_finish_while_the_next_are_still_being_fetched(tmp_path):
+    """Fetching a burst can be a download from iCloud. With every core filled
+    before anything finished was looked at, Pack in iCloud sat at nought for
+    minutes with bursts already packed."""
+    import time
+    frames = [f for s in range(4) for f in _burst(2, seed=20 + s)]
+    paths = _files(tmp_path, frames)
+    events: list[str] = []
+
+    def jobs():
+        for i in range(4):
+            time.sleep(2)                                  # the download
+            events.append(f"handed b{i}")
+            yield f"b{i}", paths[2 * i:2 * i + 2], None, tmp_path / f"b{i}{bp.EXT}"
+
+    bp._pack_parallel(jobs(), 4, lambda _line: None, lambda bid, b, a, err: events.append(f"ended {bid}"))
+    assert sorted(e for e in events if e.startswith("ended")) == [f"ended b{i}" for i in range(4)]
+    assert events.index("handed b3") > min(events.index(e) for e in events if e.startswith("ended")), \
+        "a finished burst is recorded before the last one is even fetched"
+
+
 _STOPPED_MIDWAY = """
 import sys
 from pathlib import Path

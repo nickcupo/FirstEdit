@@ -1468,10 +1468,11 @@ def _pack_parallel(jobs, workers: int, tick, ended) -> None:
     and a stopped pack never ended. A pipe ends when its one process does,
     whatever it was doing, and here any still running are killed on the way out.
 
-    `jobs` is read only as a worker comes free: archive.repack hands over a
-    generator that fetches a burst's ARWs from iCloud as it yields it, and
-    that should run just ahead of the packing, not download the whole shoot
-    before the first burst starts."""
+    `jobs` is read only as a worker comes free, one at a time, with finished
+    bursts taken in between: archive.repack hands over a generator that
+    fetches a burst's ARWs from iCloud as it yields it, and that should run
+    just ahead of the packing, not download the whole shoot before the first
+    burst starts, nor hold back the record of those already packed."""
     import multiprocessing as mp
     from multiprocessing.connection import wait
     ctx = mp.get_context("spawn")
@@ -1480,34 +1481,45 @@ def _pack_parallel(jobs, workers: int, tick, ended) -> None:
     more = True
     try:
         while running or more:
-            while more and len(running) < workers:
+            # One burst handed out at a time, and what has finished taken in
+            # between: fetching a burst can mean downloading it from iCloud,
+            # and filling every core before looking back left finished bursts
+            # unrecorded, and the bar at nought, for minutes.
+            if more and len(running) < workers:
                 job = next(todo, None)
                 if job is None:
                     more = False
-                    break
-                r, w = ctx.Pipe(duplex=False)
-                p = ctx.Process(target=_worker_run, args=(job, w), daemon=True)
-                p.start()
-                w.close()                   # so the pipe ends when the process does
-                running[r] = (p, job)
-            for r in wait(list(running)):
-                p, job = running[r]
-                try:
-                    kind, what = r.recv()
-                except (EOFError, OSError):
-                    # Ended without saying how: killed, or out of memory.
-                    p.join()
-                    del running[r]
-                    r.close()
-                    ended(job[0], 0, 0, f"its packing process ended without finishing (exit {p.exitcode})")
-                    continue
-                if kind == "line":
-                    tick(what)
                 else:
-                    del running[r]
-                    r.close()
-                    p.join()
-                    ended(*what)
+                    r, w = ctx.Pipe(duplex=False)
+                    p = ctx.Process(target=_worker_run, args=(job, w), daemon=True)
+                    p.start()
+                    w.close()               # so the pipe ends when the process does
+                    running[r] = (p, job)
+            # Everything already said, then: wait for more only when there is
+            # no burst to hand out and a core free for it.
+            while running:
+                free = more and len(running) < workers
+                ready = wait(list(running), timeout=0 if free else None)
+                if not ready:
+                    break
+                for r in ready:
+                    p, job = running[r]
+                    try:
+                        kind, what = r.recv()
+                    except (EOFError, OSError):
+                        # Ended without saying how: killed, or out of memory.
+                        p.join()
+                        del running[r]
+                        r.close()
+                        ended(job[0], 0, 0, f"its packing process ended without finishing (exit {p.exitcode})")
+                        continue
+                    if kind == "line":
+                        tick(what)
+                    else:
+                        del running[r]
+                        r.close()
+                        p.join()
+                        ended(*what)
     finally:
         for p, _ in running.values():
             p.kill()
