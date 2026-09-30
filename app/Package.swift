@@ -21,6 +21,7 @@ let package = Package(
         .library(name: "PipelineKit", targets: ["PipelineKit"]),
         .executable(name: "SnapshotHarness", targets: ["SnapshotHarness"]),
         .executable(name: "RollThumbnail", targets: ["RollThumbnail"]),
+        .executable(name: "RollQuickLook", targets: ["RollQuickLook"]),
     ],
     targets: [
         // Thin on purpose: the app target is an entry point and a delegate.
@@ -46,6 +47,13 @@ let package = Package(
                           swiftSettings: [.swiftLanguageMode(.v5),
                                           .unsafeFlags(["-Xfrontend", "-entry-point-function-name",
                                                         "-Xfrontend", "roll_thumbnail_unused_main"])],
+                          linkerSettings: [.unsafeFlags(["-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
+                                                         "-Xlinker", "-application_extension"])]),
+        // The space bar's preview, built the same way: RollQuickLook.appex.
+        .executableTarget(name: "RollQuickLook", dependencies: ["RollPreview"],
+                          swiftSettings: [.swiftLanguageMode(.v5),
+                                          .unsafeFlags(["-Xfrontend", "-entry-point-function-name",
+                                                        "-Xfrontend", "roll_quicklook_unused_main"])],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
                                                          "-Xlinker", "-application_extension"])]),
         .testTarget(

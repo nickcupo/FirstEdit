@@ -52,13 +52,15 @@ APP="build/FirstEdit.app"
 C="$APP/Contents"
 R="$C/Resources"
 EXE="$C/MacOS/FirstEdit"
-# Finder's thumbnails for packed bursts (.roll): a Quick Look extension, built
-# from app/Sources/RollThumbnail, signed on its own with its own entitlements
-# (a Quick Look extension must be sandboxed; the app is not).
-QLX="$C/PlugIns/RollThumbnail.appex"
-QLX_EXE="$QLX/Contents/MacOS/RollThumbnail"
-QLX_PLIST=app/Resources/RollThumbnail-Info.plist
+# Packed bursts (.roll) in Finder: two Quick Look extensions, each built from
+# app/Sources/<name>, each with app/Resources/<name>-Info.plist, and signed on
+# its own with the extensions' entitlements (a Quick Look extension must be
+# sandboxed; the app is not). name:the class its Info.plist names.
+#   RollThumbnail   the thumbnail, in icon view and everywhere else
+#   RollQuickLook   the preview, under the space bar
+QL_EXTS=(RollThumbnail:RollThumbnailProvider RollQuickLook:RollPreviewProvider)
 QLX_ENTITLEMENTS=app/Resources/RollThumbnail.entitlements
+qlx() { print -r -- "$C/PlugIns/$1.appex"; }
 MARKER="build/gate.json"
 BPY=build/python/bin/python3
 # Everything the bundle is described by lives beside the strings and the icon
@@ -318,20 +320,29 @@ gate_app() {
     printf '    %s\n' "${debris[@]:0:5}"
     bad=1
   fi
-  # The thumbnail extension: there, arm64, for the same macOS, and naming
-  # the class its binary carries.
-  if [ ! -x "$QLX_EXE" ]; then
-    echo "  refusing: there is no Quick Look extension at $QLX_EXE"
-    bad=1
-  else
-    file -b "$QLX_EXE" | grep -q 'Mach-O.*arm64' || { echo "  refusing: $QLX_EXE is not an arm64 Mach-O"; bad=1; }
-    minos=$(xcrun vtool -show-build "$QLX_EXE" 2>/dev/null | awk '/minos/ {print $2; exit}')
-    [ "$minos" = "$MACOS_MIN" ] || { echo "  refusing: the extension is built for macOS ${minos:-?}, not $MACOS_MIN"; bad=1; }
+  # The Quick Look extensions: there, arm64, for the same macOS, starting in
+  # NSExtensionMain with no main of their own (NSExtensionMain calls a main
+  # back, and the extension went round until its stack ran out), and naming
+  # the class their binary carries.
+  local ext name cls x syms
+  for ext in $QL_EXTS; do
+    name=${ext%%:*} cls=${ext#*:}
+    x="$(qlx $name)/Contents/MacOS/$name"
+    if [ ! -x "$x" ]; then
+      echo "  refusing: there is no Quick Look extension at $x"
+      bad=1
+      continue
+    fi
+    file -b "$x" | grep -q 'Mach-O.*arm64' || { echo "  refusing: $x is not an arm64 Mach-O"; bad=1; }
+    minos=$(xcrun vtool -show-build "$x" 2>/dev/null | awk '/minos/ {print $2; exit}')
+    [ "$minos" = "$MACOS_MIN" ] || { echo "  refusing: $name is built for macOS ${minos:-?}, not $MACOS_MIN"; bad=1; }
     # (into a variable first: grep -q closing the pipe would fail nm under pipefail)
-    local syms; syms=$(nm "$QLX_EXE" 2>/dev/null || true)
-    echo "$syms" | grep -q '_OBJC_CLASS_$_RollThumbnailProvider' \
-      || { echo "  refusing: the extension's binary has no RollThumbnailProvider class"; bad=1; }
-  fi
+    syms=$(nm "$x" 2>/dev/null || true)
+    echo "$syms" | grep -q "_OBJC_CLASS_\$_$cls" \
+      || { echo "  refusing: $name's binary has no $cls class"; bad=1; }
+    echo "$syms" | grep -qE ' T _main$' && { echo "  refusing: $name has a main of its own"; bad=1; }
+    echo "$syms" | grep -q ' U _NSExtensionMain$' || { echo "  refusing: $name does not start in NSExtensionMain"; bad=1; }
+  done
   return $bad
 }
 
@@ -603,12 +614,16 @@ cp "$SWIFTBIN/FirstEdit" "$EXE"
 # at, which on his machine are under his home folder.
 strip -S -x "$EXE" 2>/dev/null || true
 [ -x "$EXE" ] || { echo "the app's binary did not reach the bundle"; exit 1; }
-[ -x "$SWIFTBIN/RollThumbnail" ] || { echo "swift build produced no RollThumbnail in $SWIFTBIN"; exit 1; }
-mkdir -p "$QLX/Contents/MacOS"
-sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NO/" "$QLX_PLIST" > "$QLX/Contents/Info.plist"
-cp "$SWIFTBIN/RollThumbnail" "$QLX_EXE"
-# -x would take the class name the extension is found by with it; -S only.
-strip -S "$QLX_EXE" 2>/dev/null || true
+for ext in $QL_EXTS; do
+  name=${ext%%:*}
+  [ -x "$SWIFTBIN/$name" ] || { echo "swift build produced no $name in $SWIFTBIN"; exit 1; }
+  mkdir -p "$(qlx $name)/Contents/MacOS"
+  sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NO/" "app/Resources/$name-Info.plist" \
+    > "$(qlx $name)/Contents/Info.plist"
+  cp "$SWIFTBIN/$name" "$(qlx $name)/Contents/MacOS/$name"
+  # -x would take the class name the extension is found by with it; -S only.
+  strip -S "$(qlx $name)/Contents/MacOS/$name" 2>/dev/null || true
+done
 fi
 
 if [ "${STAGE:-}" != "dmg" ]; then
@@ -638,9 +653,9 @@ xattr -cr "$APP"
 files=("${(@f)$("$BPY" app/macho.py "$R")}")
 for ((i = 1; i <= ${#files}; i += 40)); do sign "${files[@]:$((i-1)):40}"; done
 echo "  ${#files} files signed"
-# Inside out: the extension is sealed into the app's signature, so it is
-# signed first, with its own entitlements.
-sign_qlx "$QLX"
+# Inside out: the extensions are sealed into the app's signature, so they are
+# signed first, with their own entitlements.
+for ext in $QL_EXTS; do sign_qlx "$(qlx ${ext%%:*})" || exit 1; done
 sign "$APP"
 codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | tail -1
 if [ -n "$IDENTITY" ]; then
