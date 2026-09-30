@@ -52,6 +52,13 @@ APP="build/FirstEdit.app"
 C="$APP/Contents"
 R="$C/Resources"
 EXE="$C/MacOS/FirstEdit"
+# Finder's thumbnails for packed bursts (.roll): a Quick Look extension, built
+# from app/Sources/RollThumbnail, signed on its own with its own entitlements
+# (a Quick Look extension must be sandboxed; the app is not).
+QLX="$C/PlugIns/RollThumbnail.appex"
+QLX_EXE="$QLX/Contents/MacOS/RollThumbnail"
+QLX_PLIST=app/Resources/RollThumbnail-Info.plist
+QLX_ENTITLEMENTS=app/Resources/RollThumbnail.entitlements
 MARKER="build/gate.json"
 BPY=build/python/bin/python3
 # Everything the bundle is described by lives beside the strings and the icon
@@ -69,10 +76,18 @@ ICON=build/AppIcon.icon
 MACOS_MIN="$(sed -n 's|.*<key>LSMinimumSystemVersion</key><string>\([0-9.]*\)</string>.*|\1|p' "$PLIST")"
 MACOS_MIN="${MACOS_MIN:-15.0}"
 IDENTITY="${IDENTITY:-}"
-SIGN=(codesign --force --options runtime --entitlements "$ENTITLEMENTS")
-if [ -n "$IDENTITY" ]; then SIGN+=(--timestamp --sign "$IDENTITY"); else SIGN+=(--sign -); fi
+if [ -n "$IDENTITY" ]; then WHO=(--timestamp --sign "$IDENTITY"); else WHO=(--sign -); fi
+SIGN=(codesign --force --options runtime --entitlements "$ENTITLEMENTS" "${WHO[@]}")
 # Apple's timestamp service drops out now and then; a signature made without it is rejected by notarization, so retry.
 sign() { local n out; for n in 1 2 3 4 5; do if out=$("${SIGN[@]}" "$@" 2>&1); then return 0; fi; echo "$out" | grep -v "replacing existing signature" || true; echo "  codesign failed (try $n), waiting"; sleep 20; done; return 1; }
+# The same, with the extension's entitlements in place of the app's.
+sign_qlx() {
+  local -a app_sign=("${SIGN[@]}")
+  SIGN=(codesign --force --options runtime --entitlements "$QLX_ENTITLEMENTS" "${WHO[@]}")
+  sign "$@"; local ok=$?
+  SIGN=("${app_sign[@]}")
+  return $ok
+}
 
 # A public build is the default, and the other kind has to be asked for by
 # its exact name. The flag used to run the other way (PUBLIC_BUILD=1 left the
@@ -302,6 +317,20 @@ gate_app() {
     echo "  refusing: build leftovers are inside the bundle:"
     printf '    %s\n' "${debris[@]:0:5}"
     bad=1
+  fi
+  # The thumbnail extension: there, arm64, for the same macOS, and naming
+  # the class its binary carries.
+  if [ ! -x "$QLX_EXE" ]; then
+    echo "  refusing: there is no Quick Look extension at $QLX_EXE"
+    bad=1
+  else
+    file -b "$QLX_EXE" | grep -q 'Mach-O.*arm64' || { echo "  refusing: $QLX_EXE is not an arm64 Mach-O"; bad=1; }
+    minos=$(xcrun vtool -show-build "$QLX_EXE" 2>/dev/null | awk '/minos/ {print $2; exit}')
+    [ "$minos" = "$MACOS_MIN" ] || { echo "  refusing: the extension is built for macOS ${minos:-?}, not $MACOS_MIN"; bad=1; }
+    # (into a variable first: grep -q closing the pipe would fail nm under pipefail)
+    local syms; syms=$(nm "$QLX_EXE" 2>/dev/null || true)
+    echo "$syms" | grep -q '_OBJC_CLASS_$_RollThumbnailProvider' \
+      || { echo "  refusing: the extension's binary has no RollThumbnailProvider class"; bad=1; }
   fi
   return $bad
 }
@@ -574,6 +603,12 @@ cp "$SWIFTBIN/FirstEdit" "$EXE"
 # at, which on his machine are under his home folder.
 strip -S -x "$EXE" 2>/dev/null || true
 [ -x "$EXE" ] || { echo "the app's binary did not reach the bundle"; exit 1; }
+[ -x "$SWIFTBIN/RollThumbnail" ] || { echo "swift build produced no RollThumbnail in $SWIFTBIN"; exit 1; }
+mkdir -p "$QLX/Contents/MacOS"
+sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NO/" "$QLX_PLIST" > "$QLX/Contents/Info.plist"
+cp "$SWIFTBIN/RollThumbnail" "$QLX_EXE"
+# -x would take the class name the extension is found by with it; -S only.
+strip -S "$QLX_EXE" 2>/dev/null || true
 fi
 
 if [ "${STAGE:-}" != "dmg" ]; then
@@ -603,6 +638,9 @@ xattr -cr "$APP"
 files=("${(@f)$("$BPY" app/macho.py "$R")}")
 for ((i = 1; i <= ${#files}; i += 40)); do sign "${files[@]:$((i-1)):40}"; done
 echo "  ${#files} files signed"
+# Inside out: the extension is sealed into the app's signature, so it is
+# signed first, with its own entitlements.
+sign_qlx "$QLX"
 sign "$APP"
 codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | tail -1
 if [ -n "$IDENTITY" ]; then

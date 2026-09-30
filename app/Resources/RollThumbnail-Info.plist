@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <!-- The Quick Look thumbnail extension inside FirstEdit.app
+       (Contents/PlugIns/RollThumbnail.appex). Its identifier has to start
+       with the app's, and its version is the app's: app/build.sh fills both
+       placeholders from the same numbers. -->
+  <key>CFBundleName</key><string>RollThumbnail</string>
+  <key>CFBundleDisplayName</key><string>FirstEdit Packed Burst Thumbnails</string>
+  <key>CFBundleIdentifier</key><string>com.nickcupo.firstedit.roll-thumbnail</string>
+  <key>CFBundleExecutable</key><string>RollThumbnail</string>
+  <key>CFBundlePackageType</key><string>XPC!</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__BUILD__</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>NSExtension</key><dict>
+    <key>NSExtensionPointIdentifier</key><string>com.apple.quicklook.thumbnail</string>
+    <key>NSExtensionPrincipalClass</key><string>RollThumbnailProvider</string>
+    <key>NSExtensionAttributes</key><dict>
+      <key>QLSupportedContentTypes</key><array><string>com.nickcupo.firstedit.roll</string></array>
+      <key>QLThumbnailMinimumDimension</key><integer>0</integer>
+    </dict>
+  </dict>
+</dict></plist>

@@ -20,6 +20,7 @@ let package = Package(
         .executable(name: "FirstEdit", targets: ["FirstEdit"]),
         .library(name: "PipelineKit", targets: ["PipelineKit"]),
         .executable(name: "SnapshotHarness", targets: ["SnapshotHarness"]),
+        .executable(name: "RollThumbnail", targets: ["RollThumbnail"]),
     ],
     targets: [
         // Thin on purpose: the app target is an entry point and a delegate.
@@ -28,9 +29,18 @@ let package = Package(
         .executableTarget(name: "FirstEdit", dependencies: ["PipelineKit"]),
         .target(name: "PipelineKit"),
         .executableTarget(name: "SnapshotHarness", dependencies: ["PipelineKit"]),
+        // Finder's thumbnails for packed bursts. RollPreview reads a .roll and
+        // nothing else, so the extension that links it stays small: it runs
+        // inside Finder's thumbnailer, not beside the engine. RollThumbnail is
+        // the extension's binary; app/build.sh puts it in
+        // Contents/PlugIns/RollThumbnail.appex. Swift 5 mode for it alone:
+        // QuickLook's callbacks are not annotated for Swift 6 yet.
+        .target(name: "RollPreview"),
+        .executableTarget(name: "RollThumbnail", dependencies: ["RollPreview"],
+                          swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(
             name: "PipelineKitTests",
-            dependencies: ["PipelineKit"],
+            dependencies: ["PipelineKit", "RollPreview"],
             // Captured from the real server by tools/capture-fixtures.sh.
             // Copied rather than processed: they are bytes the decoder has to
             // survive, and a resource step that rewrote them would be testing

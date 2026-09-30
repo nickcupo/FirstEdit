@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <!-- A Quick Look extension has to be sandboxed; macOS will not load one
+       that is not. It reads only the file Finder hands it, which the system
+       opens to it for the one request, so it asks for nothing else. The app
+       itself is not sandboxed (entitlements.plist says why). -->
+  <key>com.apple.security.app-sandbox</key><true/>
+</dict></plist>

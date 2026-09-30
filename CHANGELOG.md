@@ -12,6 +12,12 @@ iCloud) is unpacked into a temporary folder, checked, and the previews and
 decode are made from it. One unpack does a whole burst's thumbnails. The RAW
 is not put back into the shoot; Bring Back from iCloud does that.
 
+Packed bursts show the kept frame in Finder. The app declares `.roll` as its
+own file type and carries a Quick Look extension (Contents/PlugIns/
+RollThumbnail.appex) that reads the camera's preview of the kept frame
+straight out of the file, without unpacking a RAW. Open the app once from
+/Applications for Finder to find it.
+
 Install and Relaunch no longer leaves the app open without its engine. The
 update sheet stayed up over the window, and the quit asked the engine, which
 had already gone, whether a job was running; the installer waited for an app

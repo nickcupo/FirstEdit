@@ -121,6 +121,8 @@ writing the presets or building the PhotoLab folder first brings back any RAW
 that is only in iCloud, from its ARW or its `.roll`. The viewer shows packed
 frames as it shows RAWs, unpacking a burst when one of its frames is opened.
 **Bring Back from iCloud…** puts every RAW of a shoot back on the Mac.
+In Finder, each `.roll` shows the frame you kept as its icon, and the space
+bar previews it, even for files that are only in iCloud.
 **Free Up Space ▸ Pack in iCloud** packs RAWs that are already up there as
 ARWs, then removes each ARW copy once its packed copy is proven.
 
