@@ -7,8 +7,8 @@ A burst's RAWs kept as the keeper and how the others differ. Lossless: what
 `unpack` writes is the file that was packed, every byte, with its modified
 time. It ships with the engine like every other module in `pipeline/`.
 
-On Finish, **Back Up to iCloud…** asks which form: *RAW files*, or *Packed,
-about half the size*. Packed packs each burst the copy is about to send into
+On Finish, **Back Up to iCloud…** asks which form: *Packed, about half the
+size*, which is chosen to begin with, or *RAW files*. Packed packs each burst the copy is about to send into
 `packed/burst-<n>.roll` in the shoot (a frame in no burst into
 `packed/frame-<name>.roll`), checks it, and sends those files instead of the
 ARWs. From a terminal:

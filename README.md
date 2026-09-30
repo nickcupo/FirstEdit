@@ -41,6 +41,9 @@ the edit there.
   your finished exports.
 - **Everything is explained.** Each frame's note says what was decided and why.
   Nothing is written that PhotoLab can't open.
+- **Packed RAW backups.** Backing up to iCloud packs each burst into one
+  lossless `.roll` file at roughly half the size of its RAWs, and every byte
+  comes back on the way down.
 
 Noise reduction stays in PhotoLab (DeepPRIME). FirstEdit never renders your
 photos itself.
@@ -78,6 +81,50 @@ finish the edit.
 | **4. Presets** | A sidecar is written beside each keeper's RAW. |
 | **5. Edit in PhotoLab** | Your keepers open in one folder, with their sidecars. |
 | **6. Instagram & Finish** | Crops for Instagram. What you exported is recorded so the next shoot learns from it. |
+
+## Packed RAW backups
+
+**Finish ▸ Back Up to iCloud…** sends a shoot's RAWs up *packed* by default.
+Choose *RAW files* on the same sheet to send the ARWs as they are.
+
+**How it saves space.** A burst is many near-identical frames. Each burst
+becomes one file, `packed/burst-<n>.roll`, holding every frame of that burst,
+not just one of them. The frame you kept is stored on its own, compressed.
+Each of the others is stored as its difference from the frame next to it,
+after allowing for the camera moving a few pixels between shots. A frame that
+isn't in any burst gets a file of its own (`frame-<name>.roll`), compressed
+the same way. The codec understands Sony's compressed-ARW sensor blocks
+(a6500 "Compressed" RAW), which is where most of the saving comes from. The
+frame-to-frame differences add the rest.
+
+**It's lossless.** Unpacking gives back the original ARW, byte for byte, with
+its modified time. Each file is unpacked and checked against its RAWs'
+checksums before it is copied up, and read back after. A frame that doesn't
+come back exactly is sent as its ARW instead.
+
+**Estimated savings.**
+
+| | RAWs | Packed (about 55%) | Saved |
+|---|---|---|---|
+| One a6500 compressed ARW | ~24 MB | ~13 MB | ~11 MB |
+| A 1,000-frame shoot | ~24 GB | ~13 GB | ~11 GB |
+| A year of 40 such shoots | ~960 GB | ~530 GB | ~430 GB |
+
+Measured on real hand-held bursts, the packed files came to 40–66% of their
+RAWs' size, 55% overall, where `xz -9` managed 74%. Frames shot in bright
+light at base ISO should pack smaller, and dark, noisy ones larger, because
+sensor noise can't be predicted. `./pl burstpack bench <shoot>` measures a
+shoot of yours without writing anything.
+
+**Getting them back.** You never have to unpack by hand. Culling again,
+writing the presets or building the PhotoLab folder first brings back any RAW
+that is only in iCloud, from its ARW or its `.roll`. The viewer shows packed
+frames as it shows RAWs, unpacking a burst when one of its frames is opened.
+**Bring Back from iCloud…** puts every RAW of a shoot back on the Mac.
+**Free Up Space ▸ Pack in iCloud** packs RAWs that are already up there as
+ARWs, then removes each ARW copy once its packed copy is proven.
+
+How the codec works, with the measurements: [docs/BURSTPACK.md](docs/BURSTPACK.md).
 
 ## The starting edit
 
@@ -129,6 +176,7 @@ edit/        the keepers, gathered for PhotoLab
 | [Color](docs/COLOR.md) | How exposure, tone and color are decided, with sources |
 | [ML](docs/ML.md) | What is learned, and the checks it has to pass |
 | [Design](docs/DESIGN.md) | The app, screen by screen |
+| [Burstpack](docs/BURSTPACK.md) | Packed RAW backups: the format, the codec and what it saves |
 | [Contributing](CONTRIBUTING.md) | Running the checks and building the app |
 | [Releasing](RELEASING.md) | Signing, notarizing and publishing a release |
 

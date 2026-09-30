@@ -709,3 +709,67 @@ def test_the_sheet_reads_the_repack_list(tmp_path, monkeypatch, capsys):
     plan = studio._parse_plan("repack", capsys.readouterr().out, {})
     assert plan["ready"] and plan["label"].startswith("Pack 5 frames in iCloud (")
     assert studio._stor_argv(studio.Shoot(shoot), "repack", {}, apply=True)[-3:] == ["repack", str(shoot), "--apply"]
+
+
+def _fake_imaging(monkeypatch) -> list[Path]:
+    """cull's exiftool and faces' rawpy, stood in for: each writes a JPEG
+    named for the frame holding the SHA-256 of the RAW it was handed, so the
+    test sees which bytes the viewer made its pictures from."""
+    import hashlib
+    import types
+    import common
+    made: list[Path] = []
+
+    def extract_previews(files, outdir, meta=None):
+        for f in files:
+            (outdir / f"{f.stem}.jpg").write_text(hashlib.sha256(f.read_bytes()).hexdigest())
+            made.append(f)
+
+    def decode_to_file(raw, out, full=True):
+        out.write_text(hashlib.sha256(raw.read_bytes()).hexdigest())
+        return out
+
+    def ensure_thumbs(previews, thumbs, files, decoded=None, large=None):
+        for f in files:
+            for d in (thumbs, large):
+                d.mkdir(parents=True, exist_ok=True)
+                (d / f"{f['stem']}.jpg").write_bytes((previews / f"{f['stem']}.jpg").read_bytes())
+
+    monkeypatch.setitem(sys.modules, "cull", types.SimpleNamespace(
+        extract_previews=extract_previews, read_metadata=lambda files: {}))
+    monkeypatch.setitem(sys.modules, "faces", types.SimpleNamespace(decode_to_file=decode_to_file))
+    monkeypatch.setattr(common, "ensure_thumbs", ensure_thumbs)
+    return made
+
+
+@pytest.mark.parametrize("where", ["here", "icloud"])
+def test_a_frame_only_in_a_packed_burst_still_has_its_pictures(tmp_path, monkeypatch, where):
+    import hashlib
+    import shutil
+    import archive
+    studio = pytest.importorskip("studio")
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    if where == "icloud":
+        assert archive.push(shoot, apply=True, form="packed") == 0
+        shutil.rmtree(shoot / "packed")
+    shutil.rmtree(shoot / "raw")                      # the RAWs let go, and the cache taken back
+    made = _fake_imaging(monkeypatch)
+    s = studio.Shoot(shoot)
+    sha = {Path(n).stem: hashlib.sha256(b).hexdigest() for n, b in raws.items()}
+    first = sorted(sha)[0]
+
+    assert studio.Handler._raw(s, first) is None
+    assert studio.Handler._previews_from_packed(s, first)
+    burst = {p.stem for p in made}
+    assert first in burst and len(burst) == 3, "the whole burst in one unpack, and only that burst"
+    for stem in burst:
+        for sub in ("previews", "thumbs", "large"):
+            assert (shoot / "cull" / sub / f"{stem}.jpg").read_text() == sha[stem]
+    assert (shoot / "cull" / "previews" / "CACHEDIR.TAG").exists(), "made here, so reclaimable again"
+    n = len(made)
+    assert studio.Handler._previews_from_packed(s, sorted(burst)[1]) and len(made) == n
+
+    decoded = studio.Handler._decoded(s, first)
+    assert decoded is not None and decoded.read_text() == sha[first]
+    assert not (shoot / "raw").exists(), "the RAW is not put back into the shoot"
+    assert studio.Handler._decoded(s, "TSC09999") is None

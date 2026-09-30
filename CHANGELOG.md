@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.9
+
+Back Up to iCloud chooses Packed to begin with; RAW files is still on the
+sheet.
+
+Frames that are only in a packed burst show in the viewer like any other:
+the grid, the full view and 1:1. With no RAW on this Mac and no picture of it
+cached, the burst holding the frame (in the shoot's packed/ folder, else in
+iCloud) is unpacked into a temporary folder, checked, and the previews and
+decode are made from it. One unpack does a whole burst's thumbnails. The RAW
+is not put back into the shoot; Bring Back from iCloud does that.
+
+Install and Relaunch no longer leaves the app open without its engine. The
+update sheet stayed up over the window, and the quit asked the engine, which
+had already gone, whether a job was running; the installer waited for an app
+that never quit. The app now closes the sheet, skips that question, and ends
+itself if it has not quit within five seconds.
+
 ## v0.1.8
 
 RAW files already in iCloud can be packed where they are: Free Up Space ▸

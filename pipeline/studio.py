@@ -641,6 +641,85 @@ def within(p: Path, top: Path) -> bool:
     return os.path.commonpath([os.path.realpath(p), inside]) == inside
 
 
+# ------------------------------------------ frames that are only in a packed burst
+#
+# A shoot backed up packed can have frames with no RAW on this Mac: the RAWs
+# were let go, and "Take Back the Cache" then took their previews too. The
+# viewer used to answer those with 404. Now the packed burst that holds the
+# frame - the one in the shoot's packed/ folder, else the one in iCloud - is
+# unpacked into a temporary folder, checked against its checksum as every
+# unpack is, and the previews and decode are made from it as from a RAW. The
+# RAW itself is not put back into the shoot: that is Bring Back's to do.
+
+_PACKED_INDEX: dict[str, tuple] = {}
+_PACKED_INDEX_LOCK = threading.Lock()
+
+
+def _packed_header(p: Path) -> dict | None:
+    """The list at the head of a packed burst, read without the rest of it."""
+    import burstpack
+    try:
+        with p.open("rb") as fh:
+            head = fh.read(len(burstpack.MAGIC) + 8)
+            if len(head) < len(burstpack.MAGIC) + 8 or head[:len(burstpack.MAGIC)] != burstpack.MAGIC:
+                return None
+            n = int.from_bytes(head[len(burstpack.MAGIC):], "little")
+            return burstpack.read_manifest(head + fh.read(n))[0]
+    except (OSError, ValueError):
+        return None
+
+
+def packed_holding(folder: Path, stem: str) -> tuple[Path, str] | None:
+    """The packed burst that holds frame `stem` of this shoot, and the frame's
+    name inside it; None when no packed burst holds it. The copy on this Mac
+    first; the one in iCloud is named by archive.json, so finding it reads
+    nothing off iCloud, and only unpacking it brings it down."""
+    import archive as amod
+    try:
+        local = amod.local_packed(folder)
+        man = amod.manifest_path(folder)
+        sig = (tuple((str(q), q.stat().st_mtime_ns, q.stat().st_size) for q in local),
+               man.stat().st_mtime_ns if man.exists() else 0)
+    except OSError:
+        return None
+    with _PACKED_INDEX_LOCK:
+        got = _PACKED_INDEX.get(str(folder))
+    if got is None or got[0] != sig:
+        index: dict[str, tuple[Path, str]] = {}
+        for q in local:
+            for f in (_packed_header(q) or {}).get("frames", []):
+                index.setdefault(Path(f["name"]).stem, (q, f["name"]))
+        try:
+            up = amod.packed_frames(amod.load_manifest(folder))
+        except (OSError, ValueError):
+            up = {}
+        for name, (file, _fr) in up.items():
+            q = amod.packed_dest(folder, file)
+            if Path(name).stem not in index and q.exists():
+                index[Path(name).stem] = (q, name)
+        got = (sig, index)
+        with _PACKED_INDEX_LOCK:
+            _PACKED_INDEX[str(folder)] = got
+    return got[1].get(stem)
+
+
+@contextlib.contextmanager
+def _unpacked(src: Path, names: set[str]):
+    """The named frames of one packed burst, as RAW files in a temporary
+    folder that goes when the block ends. ValueError when the burst cannot be
+    unpacked or a frame does not match its checksum; OSError when it cannot
+    be read."""
+    import tempfile
+    import burstpack
+    with tempfile.TemporaryDirectory(prefix="first-edit-roll-") as d:
+        out = []
+        for name, data in burstpack._unpack_bytes(src.read_bytes(), names).items():
+            p = Path(d) / Path(name).name
+            p.write_bytes(data)
+            out.append(p)
+        yield out
+
+
 def stars_asked(value) -> int | None:
     """A rating the page asked for: None ("as culled") or a whole 0 to 5.
 
@@ -6319,6 +6398,12 @@ class Handler(BaseHTTPRequestHandler):
                 for p in cands:
                     if p.exists():
                         return self._send(200, p.read_bytes(), "image/jpeg", cache=True)
+                # Nothing cached and no RAW here: a frame that is only in a
+                # packed burst has its previews made from that.
+                if self._raw(s, stem) is None and self._previews_from_packed(s, stem):
+                    for p in cands:
+                        if p.exists():
+                            return self._send(200, p.read_bytes(), "image/jpeg", cache=True)
         self._send(404, b"not found", "text/plain")
 
     @staticmethod
@@ -6348,7 +6433,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
         raw = Handler._raw(s, stem)
         if raw is None:
-            return None
+            return Handler._decoded_from_packed(s, stem, decoded)
         # One decode of this frame at a time, and the gate around the whole of
         # it. The page asks for the same frame twice easily - the prefetch and
         # the real <img> a keypress later - and both used to pay the full 650 ms
@@ -6357,6 +6442,55 @@ class Handler(BaseHTTPRequestHandler):
             if decoded.exists():
                 return decoded               # the request in front of this one made it
             return Handler._decode_now(s, stem, raw, decoded)
+
+    @staticmethod
+    def _decoded_from_packed(s, stem: str, decoded: Path):
+        """The decode of a frame whose RAW is only in a packed burst."""
+        held = packed_holding(s.folder, stem)
+        if held is None:
+            return None
+        with _decoding((str(s.folder), stem)), _gate():
+            if decoded.exists():
+                return decoded
+            try:
+                with _unpacked(held[0], {held[1]}) as got:
+                    return Handler._decode_now(s, stem, got[0], decoded) if got else None
+            except (OSError, ValueError) as e:
+                print(f"  {stem}: its packed burst could not be unpacked: {e}", flush=True)
+                return None
+
+    @staticmethod
+    def _previews_from_packed(s, stem: str) -> bool:
+        """The camera's previews and the grid's thumbnails, for a frame whose
+        RAW is only in a packed burst. Every frame of that burst still missing
+        a preview is done in the same unpack, so a grid of a packed shoot
+        unpacks each burst once rather than once per tile."""
+        held = packed_holding(s.folder, stem)
+        prev = s.cull / "previews"
+        if held is None or not within(prev, s.folder):
+            return False
+        with _decoding((str(held[0]),)), _gate():
+            if (prev / f"{stem}.jpg").exists():
+                return True              # the request in front of this one made them
+            names = {f["name"] for f in (_packed_header(held[0]) or {}).get("frames", [])}
+            names = {n for n in names if not (prev / f"{Path(n).stem}.jpg").exists()} | {held[1]}
+            from cull import extract_previews, read_metadata
+            from common import ensure_thumbs
+            from library import cache_dir
+            try:
+                with _unpacked(held[0], names) as got:
+                    if not prev.exists():
+                        cache_dir(prev, built_by="studio")
+                    extract_previews(got, prev, read_metadata(got))
+                    stems = [p.stem for p in got]
+            except (OSError, ValueError) as e:
+                print(f"  {stem}: its packed burst could not be unpacked: {e}", flush=True)
+                return False
+            for sub in ("thumbs", "large"):
+                if not (s.cull / sub).exists():
+                    cache_dir(s.cull / sub, built_by="studio")
+            ensure_thumbs(prev, s.cull / "thumbs", [{"stem": x} for x in stems], large=s.cull / "large")
+            return (prev / f"{stem}.jpg").exists()
 
     @staticmethod
     def _decode_now(s, stem: str, raw: Path, decoded: Path):
