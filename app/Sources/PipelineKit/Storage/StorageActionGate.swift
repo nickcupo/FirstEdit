@@ -48,11 +48,14 @@ struct StorageActionGate: Equatable {
             // Copied up before Finish, the RAWs are still going to be read;
             // the engine refuses the same (`archive.drop`).
             if !r.finished { return Strings.Storage.dropNotFinished }
+        case .repack:
+            // Packing what is up there needs something up there as RAW files.
+            if a.raw_up == 0 { return Strings.Storage.repackNothing }
         case .free:
-            // Free Up Space asks where; it is off only when neither place has
+            // Free Up Space asks where; it is off only when no choice has
             // anything to give, and then it says why this Mac has nothing.
-            let here = reason(.drop), there = reason(.trim)
-            if here != nil && there != nil { return here }
+            let here = reason(.drop), there = reason(.trim), pack = reason(.repack)
+            if here != nil && there != nil && pack != nil { return here }
         case .expire:
             if a.up == 0 { return Strings.Storage.nothingInICloud }
             if !r.finished { return Strings.Storage.expireNotFinished }
@@ -70,7 +73,7 @@ struct StorageActionGate: Equatable {
         case .pull: text = storage.archive.pullable_text
         case .drop, .free: text = storage.archive.droppable_text
         case .reclaim: text = storage.cache.bytes_text
-        case .expire, .trim: text = ""
+        case .expire, .trim, .repack: text = ""
         }
         return reason(action) == nil && text != "0 B" ? text : ""
     }

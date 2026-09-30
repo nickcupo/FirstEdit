@@ -135,7 +135,11 @@ public struct DerivedPresetSplit: PresetSplitSource {
 public struct AutomaticPresetSplit: PresetSplitSource {
     public init() {}
     @MainActor public func split(_ s: ShootSession) -> PresetSplit {
-        StepCapabilities.current.countsAreTwoAuthored(s.info) && Self.agreedIsPicks(s.info)
+        // The engine's numbers are a snapshot: a keeper he marks after it was
+        // taken is not in them, and the page said so only once the presets
+        // were written and the shoot read again. His marks are counted here
+        // from the moment one differs from the snapshot.
+        !s.markedSinceCounted && StepCapabilities.current.countsAreTwoAuthored(s.info) && Self.agreedIsPicks(s.info)
             ? EnginePresetSplit().split(s)
             : DerivedPresetSplit().split(s)
     }

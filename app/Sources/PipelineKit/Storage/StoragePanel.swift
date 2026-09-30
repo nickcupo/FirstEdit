@@ -32,14 +32,14 @@ public struct StoragePanel: View {
         /// `free` is Free Up Space: one sheet that asks where, and is drop
         /// ("On this Mac") or trim ("In iCloud") by the answer. `drop` and
         /// `trim` are still actions of their own for the menu and the gate.
-        case push, pull, reclaim, drop, trim, free, expire
+        case push, pull, reclaim, drop, trim, repack, free, expire
         var id: String { rawValue }
         var what: String { rawValue }
 
         var rung: Rung? {
             switch self {
             case .push, .pull: return nil
-            case .reclaim, .drop, .trim, .free: return .removesACopy
+            case .reclaim, .drop, .trim, .repack, .free: return .removesACopy
             case .expire: return .deletesPhotographs
             }
         }
@@ -109,10 +109,10 @@ public struct StoragePanel: View {
             if action == .expire {
                 ExpireSheet(shoot: shoot, model: model) { sheet = nil }
             } else if action == .free {
-                // On this Mac when there is something here to free, else in iCloud.
+                // On this Mac when there is something here to free; else in
+                // iCloud; else packing what is up there as RAW files.
                 PlanSheet(rung: .removesACopy,
-                          request: StorageModel.Request("free",
-                                                        PlanOptions(form: gate?.reason(.drop) == nil ? "mac" : "icloud")),
+                          request: StorageModel.Request("free", PlanOptions(form: freeDefault)),
                           model: model) { sheet = nil }
             } else {
                 PlanSheet(rung: action.rung, request: StorageModel.Request(action.what),
@@ -239,6 +239,12 @@ public struct StoragePanel: View {
             }
             reasons([(.push, Strings.Storage.push), (.pull, Strings.Storage.pull)])
         }
+    }
+
+    private var freeDefault: String {
+        if gate?.reason(.drop) == nil { return "mac" }
+        if gate?.reason(.trim) == nil { return "icloud" }
+        return "pack"
     }
 
     /// The checks and the cache, out of the way until they are wanted.

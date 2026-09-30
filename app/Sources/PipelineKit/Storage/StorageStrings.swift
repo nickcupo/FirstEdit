@@ -112,6 +112,18 @@ extension Strings {
         public static var freeWhere: String { s("storage.freeWhere", "Remove the copies", "Free Up Space's choice.") }
         public static var freeOnThisMac: String { s("storage.freeOnThisMac", "On this Mac", "Free Up Space's choice.") }
         public static var freeInICloud: String { s("storage.freeInICloud", "In iCloud", "Free Up Space's choice.") }
+        public static var freePackInICloud: String {
+            s("storage.freePackInICloud", "Pack in iCloud", "Free Up Space's choice.")
+        }
+        public static var freePackNote: String {
+            s("storage.freePackNote",
+              "Packs the RAW files already in iCloud to about half their size, and lets each ARW copy go only once its packed copy is up and gives it back exactly. Until iCloud has uploaded a packed copy, its ARWs stay; choosing this again lets them go.",
+              "Under Free Up Space's choice, Pack in iCloud.")
+        }
+        public static var repackNothing: String {
+            s("storage.repackNothing", "Nothing of this shoot is in iCloud as RAW files.",
+              "Why Pack in iCloud has nothing to do.")
+        }
         public static var freeOnThisMacNote: String {
             s("storage.freeOnThisMacNote",
               "Only RAWs whose copy in iCloud has been read back and checked. They come back by themselves when you work on the shoot again.",
@@ -253,6 +265,9 @@ extension Strings {
             case "pull":
                 return s("storage.planTitle.pull", "This is what would be brought back",
                          "The plan sheet's title for Bring Back from iCloud.")
+            case "repack":
+                return s("storage.planTitle.repack", "These RAWs in iCloud would be packed",
+                         "The plan sheet's title for Free Up Space, Pack in iCloud.")
             case "trim":
                 return s("storage.planTitle.trim", "These copies in iCloud would go; this Mac keeps every frame",
                          "The plan sheet's title for Remove Copies from iCloud.")

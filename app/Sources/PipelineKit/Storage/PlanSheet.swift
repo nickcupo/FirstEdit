@@ -71,7 +71,8 @@ public struct PlanSheet: View {
                     FormChoice(tag: "both", label: Strings.Storage.bothCopies)]
         case "free":
             return [FormChoice(tag: "mac", label: Strings.Storage.freeOnThisMac),
-                    FormChoice(tag: "icloud", label: Strings.Storage.freeInICloud)]
+                    FormChoice(tag: "icloud", label: Strings.Storage.freeInICloud),
+                    FormChoice(tag: "pack", label: Strings.Storage.freePackInICloud)]
         default:
             return []
         }
@@ -90,8 +91,11 @@ public struct PlanSheet: View {
         // button is off until it lands. Free Up Space is one of two lists by
         // its choice: the local RAWs, or the copies in iCloud of both forms.
         if request.what == "free" {
-            return form == "icloud" ? StorageModel.Request("trim", PlanOptions(form: "both"))
-                                    : StorageModel.Request("drop")
+            switch form {
+            case "icloud": return StorageModel.Request("trim", PlanOptions(form: "both"))
+            case "pack": return StorageModel.Request("repack")
+            default: return StorageModel.Request("drop")
+            }
         }
         return formChoices.isEmpty ? request : StorageModel.Request(request.what, PlanOptions(form: form))
     }
@@ -151,7 +155,8 @@ public struct PlanSheet: View {
                 .disabled(model.applying)
                 .accessibilityIdentifier("storage.form")
                 if request.what == "free" {
-                    Text(form == "icloud" ? Strings.Storage.freeInICloudNote : Strings.Storage.freeOnThisMacNote)
+                    Text(form == "icloud" ? Strings.Storage.freeInICloudNote
+                         : form == "pack" ? Strings.Storage.freePackNote : Strings.Storage.freeOnThisMacNote)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

@@ -216,8 +216,8 @@ struct StorageActionGateTests {
         #expect(g.reason(.drop) == Strings.Storage.dropNothingHere)
         #expect(g.reason(.trim) == Strings.Storage.trimNothingHere,
                 "with no RAW here, every copy in iCloud is still needed")
-        #expect(g.reason(.free) == Strings.Storage.dropNothingHere,
-                "nothing to free anywhere, and it says why for this Mac")
+        #expect(g.reason(.repack) == nil, "the RAW files up there can be packed")
+        #expect(g.reason(.free) == nil, "nothing to free on this Mac, but iCloud's RAW files can be packed")
         // The engine does not refuse an archived shoot's cache
         // (tests/test_reclaim.py): every frame it was made from is in iCloud.
         #expect(g.reason(.reclaim) == nil)

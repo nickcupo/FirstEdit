@@ -309,6 +309,27 @@ struct PresetSplitTests {
         #expect(AutomaticPresetSplit.agreedIsPicks(ok.info))
     }
 
+    /// The page read the engine's count from when the shoot was opened, so a
+    /// keeper marked on the way to Presets was not in it until the presets
+    /// had been written and the shoot read again.
+    @Test("a keeper marked after the engine counted is in the count at once")
+    @MainActor func markedAfterCounting() throws {
+        let s = session(try PatchedFixture.shoot("shoot-decided",
+                                                  patchInfo: ["will_be_edited": 23, "agreed": 9, "kept": 23]))
+        #expect(!s.markedSinceCounted)
+        #expect(AutomaticPresetSplit().split(s).fromEngine)
+        let before = DerivedPresetSplit().split(s).willBeEdited
+        let stem = try #require(s.order.first { s.rows[$0]?.override == nil && (s.rows[$0]?.rating ?? 0) < 3 })
+        s.go(to: stem)
+        s.didDisplay(stem: stem, generation: s.cursor.generation)
+        _ = s.take(.keep, advance: false)
+        #expect(s.rows[stem]?.override != nil)
+        #expect(s.markedSinceCounted)
+        let now = AutomaticPresetSplit().split(s)
+        #expect(!now.fromEngine, "counted from his marks until the engine is asked again")
+        #expect(now.willBeEdited == before + 1)
+    }
+
     @Test("the switch between the two engines is one line")
     @MainActor func theSwitch() throws {
         let old = session(try Fixture.decode(ShootResponse.self, "shoot-decided"))

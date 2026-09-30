@@ -68,6 +68,7 @@ extension Strings {
             case "plan-pull": return q("queue.what.planPull", "Check what would come back", "A storage plan on the list.")
             case "plan-drop": return q("queue.what.planDrop", "Check what would be removed", "A storage plan on the list.")
             case "plan-expire": return q("queue.what.planExpire", "Check what would be let go", "A storage plan on the list.")
+            case "plan-repack": return q("queue.what.planRepack", "Check which RAWs in iCloud could be packed", "A storage plan on the list.")
             case "plan-trim": return q("queue.what.planTrim", "Check which copies in iCloud could go", "A storage plan on the list.")
             case "plan-reclaim":
                 return q("queue.what.planReclaim", "Check what cache would be taken back", "A storage plan on the list.")

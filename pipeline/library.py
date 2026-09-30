@@ -1028,7 +1028,7 @@ def _classify(e: Entry, sv: Survey, parts: tuple[str, ...], rawrel: str, of_reco
     #    it has no named writer, so nothing may delete it and nothing may
     #    move it. Being wrong in this direction costs disk; being wrong in the
     #    other direction cost 154 finished exports once already.
-    if parts[0] == "packed" and ext == ".fbp":
+    if parts[0] == "packed" and ext == ".roll":
         # Burstpack's: a lossless copy of a burst's RAWs, made from Finish.
         # Held like a decision, so nothing here ever takes it back.
         e.kind, e.why = Kind.DECISION, "a packed burst: its RAWs, losslessly, in one file"

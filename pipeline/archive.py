@@ -14,6 +14,8 @@ archive.py - a shoot's RAWs, kept in iCloud Drive.
     ./pl archive trim <shoot> [--only raw|packed|both] [--apply]
                                             remove copies from iCloud whose RAWs are on this Mac,
                                             the same bytes. No frame is left without a copy.
+    ./pl archive repack <shoot> [--apply]   pack the ARWs already in iCloud, then let their ARW
+                                            copies go once each packed copy is up and checked
     ./pl archive expire <shoot> [--apply]   let go of archived RAWs he no longer needs. The only
                                             command here that can destroy a photograph outright.
 
@@ -416,7 +418,7 @@ def dest_for(shoot: Path, name: str) -> Path:
 # ------------------------------------------------------------ packed bursts
 #
 # A burst packed on the Finish page (burstpack.py) is a second form a frame's
-# copy in iCloud can take: packed/<burst>.fbp in the shoot's archive folder,
+# copy in iCloud can take: packed/<burst>.roll in the shoot's archive folder,
 # holding every frame of the burst losslessly, at about half the size. push
 # sends it instead of the burst's ARWs; drop and pull accept it as the copy.
 #
@@ -461,7 +463,7 @@ def unpacked_hashes(p: Path) -> dict[str, str]:
 
 def local_packed(shoot: Path) -> list[Path]:
     d = Path(shoot) / PACKED
-    return sorted(q for q in d.glob("*.fbp") if not q.name.startswith(".")) if d.is_dir() else []
+    return sorted(q for q in d.glob("*" + _burstpack().EXT) if not q.name.startswith(".")) if d.is_dir() else []
 
 
 # ------------------------------------------------------------ status
@@ -1414,6 +1416,173 @@ def restore_for_work(shoot: Path) -> int:
     return rc
 
 
+def repack(shoot: Path, apply: bool) -> int:
+    """The ARWs already in iCloud, packed, and then their ARW copies let go.
+
+    Two halves, and a frame never has fewer than one checked copy between
+    them. First, each burst whose frames are up only as ARWs is packed: from
+    the RAW on this Mac when that is the same bytes as the record, else from
+    the ARW in iCloud (downloaded if it has to be), each checked against its
+    record before it is packed; the packed file is proved by unpacking it,
+    copied up and read back, and recorded. Then an ARW copy in iCloud goes only
+    when its frame's packed copy up there is downloaded, vouched for by iCloud
+    and unpacks - that copy - to the ARW's recorded bytes. A packed copy iCloud
+    has not finished uploading keeps its ARWs until this runs again."""
+    shoot = Path(shoot).expanduser().resolve()
+    bad = icloud_ready()
+    if bad:
+        print(f"  {bad}")
+        return 1
+    raw, _ = parts(shoot)
+    whole = load_manifest(shoot)
+    man = whole.setdefault("frames", {})
+    packs = whole.setdefault("packed", {})
+    inside = packed_frames(whole)
+    todo = sorted(n for n in man if n not in inside and dest_for(shoot, n).exists())
+    covered = sorted(n for n in man if n in inside and dest_for(shoot, n).exists())
+    print(f"  {shoot.name}: {len(todo)} frames in iCloud as ARWs only; "
+          f"{len(covered)} ARW copies whose frame is packed up there too")
+    if todo:
+        size = sum(man[n].get("bytes", 0) for n in todo)
+        print(f"  would pack {len(todo)} frames in iCloud, {human(size)}, into packed bursts, each checked,")
+        print("  and then let their ARW copies go, each only once its packed copy is up and gives it back exactly")
+        far = sum(1 for n in todo if not (local(raw / n) or local(dest_for(shoot, n))))
+        if far:
+            print(f"  {far} of them are on neither this Mac nor downloaded, so they are read from iCloud as they are packed")
+    elif covered:
+        print(f"  would remove {len(covered)} ARW copies from iCloud, "
+              f"{human(sum(man[n].get('bytes', 0) for n in covered))}, whose frame is in a packed burst up there, checked")
+    if not todo and not covered:
+        print("\n  nothing to do.")
+        return 0
+    if not apply:
+        progress("repack", 0, len(todo) + len(covered))
+        print("  nothing was changed. Add --apply.")
+        return 0
+
+    bp = _burstpack()
+    manifest_path(shoot).parent.mkdir(parents=True, exist_ok=True)
+    stage = shoot / PACKED / ".staging"
+    groups = bp.group_names(shoot, set(todo))
+    steps, step = len(todo) + len(covered), 0
+    packed_n = failed = 0
+    for gid, names, key in groups:
+        progress("repack", step, steps)
+        step += len(names)
+        srcs, why = [], ""
+        for n in names:
+            p, d = raw / n, dest_for(shoot, n)
+            if local(p) and _same_bytes(p, man[n]):
+                srcs.append(p)
+                continue
+            if not local(d) and not materialise(d):
+                why = f"iCloud did not hand {n} over"
+                break
+            if not _same_bytes(d, man[n]):
+                why = f"the ARW of {n} in iCloud does not match what was pushed"
+                break
+            srcs.append(d)
+        if why:
+            failed += len(names)
+            print(f"    {gid}: not packed: {why}")
+            continue
+        file = f"{gid}{bp.EXT}"
+        i = 2
+        while file in packs or packed_dest(shoot, file).exists():
+            file, i = f"{gid}-{i}{bp.EXT}", i + 1
+        stage.mkdir(parents=True, exist_ok=True)
+        out = stage / file
+        out.unlink(missing_ok=True)
+        q = packed_dest(shoot, file)
+        tmp = q.parent / f".{file}.part"
+        try:
+            bp.pack(srcs, out, key, log=lambda *_: None)      # proved by unpacking before it is written
+            want = sha256(out)
+            q.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(out, tmp)
+            if sha256(tmp) != want:
+                tmp.unlink(missing_ok=True)
+                failed += len(names)
+                print(f"    {file}: copied wrong, left alone")
+                continue
+            os.replace(tmp, q)
+            packs[file] = {"bytes": out.stat().st_size, "sha256": want,
+                           "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                           "frames": {n: {"bytes": man[n].get("bytes", 0), "sha256": man[n].get("sha256")}
+                                      for n in names}}
+            write_json_atomic(manifest_path(shoot), whole)
+            packed_n += len(names)
+            print(f"    {file}: {len(names)} frames, {human(q.stat().st_size)} in place of "
+                  f"{human(sum(man[n].get('bytes', 0) for n in names))}")
+        except (OSError, ValueError) as e:
+            tmp.unlink(missing_ok=True)
+            failed += len(names)
+            print(f"    {gid}: {e}")
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            write_json_atomic(manifest_path(shoot), whole)
+            raise
+        finally:
+            out.unlink(missing_ok=True)
+    try:
+        stage.rmdir()
+    except OSError:
+        pass
+
+    # The second half: ARW copies whose frame is now in a packed copy up there.
+    inside = packed_frames(whole)
+    gone = back = waiting = 0
+    unpacked: dict[str, dict[str, str] | str] = {}
+    for n in sorted(x for x in man if x in inside and dest_for(shoot, x).exists()):
+        progress("repack", min(step, steps), steps)
+        step += 1
+        file, fr = inside[n]
+        arec, q, d = packs[file], packed_dest(shoot, file), dest_for(shoot, n)
+        if not q.exists() or q.stat().st_size != arec.get("bytes"):
+            continue
+        why = _unvouched(q)
+        if why:
+            waiting += 1
+            continue
+        if not local(q) and not materialise(q):
+            waiting += 1
+            continue
+        if file not in unpacked:
+            try:
+                unpacked[file] = (unpacked_hashes(q) if sha256(q) == arec.get("sha256")
+                                  else "does not match what was pushed")
+            except (OSError, ValueError) as e:
+                unpacked[file] = f"does not unpack ({e})"
+        got = unpacked[file]
+        if isinstance(got, str):
+            print(f"    kept  {n}: its packed burst in iCloud {got}")
+            continue
+        if got.get(n) != man[n].get("sha256") or fr.get("sha256") != man[n].get("sha256"):
+            print(f"    kept  {n}: its packed burst in iCloud does not give it back as the ARW was")
+            continue
+        size = man[n].get("bytes", 0)
+        try:
+            d.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            print(f"    {n}: {e}")
+            continue
+        man.pop(n, None)
+        gone += 1
+        back += size
+    progress("repack", steps, steps)
+    write_json_atomic(manifest_path(shoot), whole)
+    said = f"Packed {packed_n} frames in iCloud; removed {gone} ARW copies, {human(back)} of your iCloud quota back."
+    if waiting:
+        said += (f" {waiting} ARW copies stay until iCloud has uploaded their packed burst;"
+                 " Free Up Space again lets them go.")
+    if failed:
+        said += f" {failed} frames could not be packed and keep their ARWs."
+    print(f"\n  {said}")
+    return 1 if failed else 0
+
+
 def trim(shoot: Path, apply: bool, form: str = "both") -> int:
     """Remove copies from iCloud that this Mac also holds, and nothing else.
 
@@ -1546,7 +1715,7 @@ def show_status(shoot: Path) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="./pl archive", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["report", "status", "push", "drop", "pull", "expire", "trim"])
+    ap.add_argument("command", choices=["report", "status", "push", "drop", "pull", "expire", "trim", "repack"])
     ap.add_argument("shoot", nargs="?")
     ap.add_argument("--apply", action="store_true", help="actually do it")
     ap.add_argument("--force", action="store_true",
@@ -1584,6 +1753,7 @@ def main() -> int:
     return {"status": lambda: show_status(p),
             "push": lambda: push(p, a.apply, a.force, a.form),
             "trim": lambda: trim(p, a.apply, a.only),
+            "repack": lambda: repack(p, a.apply),
             "drop": lambda: drop(p, a.apply),
             "pull": lambda: pull(p, a.apply),
             "expire": lambda: expire(p, a.apply, a.after, a.keepers, a.destroy)}[a.command]()
