@@ -35,6 +35,13 @@ a shoot of a thousand frames takes minutes, not hours. Fetching and checking
 each burst's ARWs, the copy up, the read back and the record stay one at a
 time; on twelve real bursts the packed files were byte for byte the same.
 
+Back Up to iCloud's sheet no longer says Packed is about half the size. On
+real a6500 shoots packing came to 57-88% of the RAWs, 79% over 1,528 frames,
+and the light decides it: dim, high-ISO frames are mostly noise, which cannot
+be predicted. A frame coded from its neighbour packs to about the size of one
+coded alone, so a long burst saves no more per frame than a short one. The
+README and docs/BURSTPACK.md have the measurements.
+
 Install and Relaunch no longer leaves the app open without its engine. The
 update sheet stayed up over the window, and the quit asked the engine, which
 had already gone, whether a job was running; the installer waited for an app
