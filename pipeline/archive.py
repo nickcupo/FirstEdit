@@ -1531,9 +1531,14 @@ def repack(shoot: Path, apply: bool) -> int:
     for t in (stage.iterdir() if stage.is_dir() else []):
         t.unlink(missing_ok=True)
     groups = bp.group_names(shoot, set(todo))
-    steps, step = len(todo) + len(covered), 0
+    # The bar is the shoot's frames packed, all of them, starting from those
+    # an earlier run packed: a Pack in iCloud stopped half way and started
+    # again picks up where it was, and the bar says so rather than starting
+    # at nought. Letting the ARW copies go is a stage of its own after it
+    # (`letgo`), so its count never reads as frames still to pack.
+    steps, step = len(inside) + len(todo), len(inside)
     packed_n = failed = 0
-    progress("repack", 0, steps)
+    progress("repack", step, steps)
     # The packing itself takes a minute a burst on one core, so bursts are
     # packed side by side, as pack_shoot does. Before that, a burst whose ARWs
     # are only in iCloud has to be downloaded - iCloud stores, it cannot pack -
@@ -1677,9 +1682,9 @@ def repack(shoot: Path, apply: bool) -> int:
     inside = packed_frames(whole)
     gone = back = waiting = 0
     unpacked: dict[str, dict[str, str] | str] = {}
-    for n in sorted(x for x in man if x in inside and dest_for(shoot, x).exists()):
-        progress("repack", min(step, steps), steps)
-        step += 1
+    letgo = sorted(x for x in man if x in inside and dest_for(shoot, x).exists())
+    for i, n in enumerate(letgo):
+        progress("letgo", i, len(letgo))
         file, fr = inside[n]
         arec, q, d = packs[file], packed_dest(shoot, file), dest_for(shoot, n)
         if not q.exists() or q.stat().st_size != arec.get("bytes"):
@@ -1715,7 +1720,10 @@ def repack(shoot: Path, apply: bool) -> int:
         man.pop(n, None)
         gone += 1
         back += size
-    progress("repack", steps, steps)
+    if letgo:
+        progress("letgo", len(letgo), len(letgo))
+    else:
+        progress("repack", steps, steps)
     write_json_atomic(manifest_path(shoot), whole)
     said = f"Packed {packed_n} frames in iCloud; removed {gone} ARW copies, {human(back)} of your iCloud quota back."
     if waiting:

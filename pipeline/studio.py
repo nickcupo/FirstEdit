@@ -290,6 +290,7 @@ STAGE_WORDS = {
     "trim": ("removing copies from iCloud", "files"),
     "unpack": ("unpacking", "frames"),
     "repack": ("packing the RAWs in iCloud", "frames"),
+    "letgo": ("letting go of the ARW copies in iCloud", "copies"),
 }
 INGEST_WEIGHTS = {"copy": 70, "verify": 30}
 # By what was asked of the copy. Without a check there is no second stage, so
@@ -315,6 +316,10 @@ UPDATE_WEIGHTS = {"download": 90, "stage": 10}
 # One stage each: a push is a push. Held as a dict per verb so the bar's
 # arithmetic below is the same for these as it is for a cull.
 STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack", "checkpacked", "trim", "unpack", "repack")}
+# Pack in iCloud is two stages: the packing, counted over every frame of the
+# shoot so a run started again opens where the last stopped, then letting the
+# ARW copies go, which only reads and removes.
+STOR_WEIGHTS["repack"] = {"repack": 80, "letgo": 20}
 # By kind, for the jobs that are one stage long and are not storage verbs. An
 # Instagram make was weighed against the cull's table, where "instagram" is
 # not a stage, and its bar sat at 0% until it ended. The planning pass is added

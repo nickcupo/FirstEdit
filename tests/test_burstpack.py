@@ -831,6 +831,27 @@ def test_pack_in_icloud_downloads_several_bursts_at_once(tmp_path, monkeypatch, 
     assert "Packed 5 frames in iCloud" in capsys.readouterr().out
 
 
+def test_pack_in_icloud_started_again_shows_where_it_had_got_to(tmp_path, monkeypatch, capsys):
+    """Stopped half way and started again, the bar opened at nought over a
+    shoot half packed. It counts every frame of the shoot, from those packed."""
+    import archive
+    shoot = _in_icloud_only(tmp_path, monkeypatch)
+    bad = archive.dest_for(shoot, "TSC01003.ARW")
+    good = bad.read_bytes()
+    bad.write_bytes(good[:-1] + b"\0")
+    assert archive.repack(shoot, apply=True) == 1                   # burst-0 packed, burst-1 not
+    capsys.readouterr()
+    bad.write_bytes(good)
+    assert archive.repack(shoot, apply=True) == 0
+    marks = [line for line in capsys.readouterr().out.splitlines() if line.startswith("@@ ")]
+    packing = [m for m in marks if m.startswith("@@ repack ")]
+    assert packing[0] == "@@ repack 3 5", "it opens at the three frames the first run packed"
+    assert packing[-1] == "@@ repack 5 5"
+    letgo = [m for m in marks if m.startswith("@@ letgo ")]
+    assert letgo and letgo[-1] == "@@ letgo 2 2", "then burst-1's two ARW copies go, as a stage of their own"
+    assert marks.index(packing[-1]) < marks.index(letgo[0])
+
+
 _STOPPED_MIDWAY = """
 import sys
 from pathlib import Path
