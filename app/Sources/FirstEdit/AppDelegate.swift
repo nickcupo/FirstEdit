@@ -142,33 +142,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DockProgress.dockMenu()
     }
 
-    /// A packed burst double-clicked in Finder: the frame he kept, unpacked
-    /// whole and checked, in Preview (RollOpener).
-    func application(_ application: NSApplication, open urls: [URL]) {
-        let rolls = urls.filter { $0.pathExtension.lowercased() == "roll" }
-        guard !rolls.isEmpty, !Self.offscreenSmoke, !Self.smoke else { return }
-        let launch = EngineLaunch.locate(bundle: .main, environment: ProcessInfo.processInfo.environment,
-                                         searchFrom: [Bundle.main.bundleURL])
-        Task { @MainActor in
-            for roll in rolls {
-                do {
-                    let raw = try await RollOpener.unpackKeeper(roll, launch: launch)
-                    if let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") {
-                        _ = try await NSWorkspace.shared.open([raw], withApplicationAt: preview,
-                                                              configuration: NSWorkspace.OpenConfiguration())
-                    } else {
-                        NSWorkspace.shared.open(raw)
-                    }
-                } catch {
-                    let a = NSAlert()
-                    a.messageText = Strings.Roll.cannotOpen(roll.lastPathComponent)
-                    a.informativeText = error.localizedDescription
-                    a.runModal()
-                }
-            }
-        }
-    }
-
     /// SwiftUI replaces the main menu when its scenes change, and the stage
     /// has to get the keyboard back after a trip to PhotoLab.
     func applicationDidBecomeActive(_ notification: Notification) {

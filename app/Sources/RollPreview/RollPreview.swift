@@ -33,6 +33,17 @@ public enum RollPreview {
 
     public static let magic = Data("FEBURST\u{01}".utf8)
 
+    /// The kept frame's picture for `url`: the one the file carries beside
+    /// its icon (already upright, read without the file's contents, so it
+    /// never downloads one iCloud has evicted), else the camera's preview
+    /// read from the file itself.
+    public static func picture(at url: URL) -> Preview? {
+        if let jpg = RollOpener.storedPicture(of: url) {
+            return Preview(jpeg: jpg, orientation: 1, frame: "")
+        }
+        return RollOpener.isDataless(url) ? nil : keeper(at: url)
+    }
+
     /// The kept frame's preview in the `.roll` at `url`, or nil.
     public static func keeper(at url: URL) -> Preview? {
         guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }

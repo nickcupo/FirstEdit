@@ -312,13 +312,6 @@ public enum Strings {
         public static let dark = String(localized: "Dark", comment: "Appearance choice")
     }
 
-    public enum Roll {
-        public static func cannotOpen(_ file: String) -> String {
-            String(localized: "roll.cannotOpen", defaultValue: "\(file) could not be opened",
-                   comment: "A packed burst double-clicked in Finder that could not be unpacked; the reason follows.")
-        }
-    }
-
     public enum Quit {
         public static func title(kind: String) -> String {
             kind == "cull"

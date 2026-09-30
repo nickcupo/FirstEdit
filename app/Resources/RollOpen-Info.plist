@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <!-- "Open Packed Burst" inside FirstEdit.app (Contents/Helpers): what a
+       double-click on a .roll runs, so that it never opens FirstEdit itself.
+       No Dock icon (LSUIElement). app/build.sh fills both placeholders. -->
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleName</key><string>Open Packed Burst</string>
+  <key>CFBundleDisplayName</key><string>Open Packed Burst</string>
+  <key>CFBundleIdentifier</key><string>com.nickcupo.firstedit.roll-open</string>
+  <key>CFBundleExecutable</key><string>RollOpen</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__BUILD__</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>FirstEdit Packed Burst</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSItemContentTypes</key><array><string>com.nickcupo.firstedit.roll</string></array>
+    </dict>
+  </array>
+  <key>UTImportedTypeDeclarations</key><array><dict>
+    <key>UTTypeIdentifier</key><string>com.nickcupo.firstedit.roll</string>
+    <key>UTTypeDescription</key><string>FirstEdit Packed Burst</string>
+    <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+    <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>roll</string></array></dict>
+  </dict></array>
+</dict></plist>

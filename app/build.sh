@@ -61,6 +61,9 @@ EXE="$C/MacOS/FirstEdit"
 QL_EXTS=(RollThumbnail:RollThumbnailProvider RollQuickLook:RollPreviewProvider)
 QLX_ENTITLEMENTS=app/Resources/RollThumbnail.entitlements
 qlx() { print -r -- "$C/PlugIns/$1.appex"; }
+# And what a double-click on a .roll runs: a helper app of its own, built from
+# app/Sources/RollOpen, so that opening a packed burst never opens FirstEdit.
+OPENER="$C/Helpers/Open Packed Burst.app"
 MARKER="build/gate.json"
 BPY=build/python/bin/python3
 # Everything the bundle is described by lives beside the strings and the icon
@@ -343,6 +346,20 @@ gate_app() {
     echo "$syms" | grep -qE ' T _main$' && { echo "  refusing: $name has a main of its own"; bad=1; }
     echo "$syms" | grep -q ' U _NSExtensionMain$' || { echo "  refusing: $name does not start in NSExtensionMain"; bad=1; }
   done
+  # The .roll opener: there, arm64, for the same macOS, and the one that says
+  # it opens .roll (the app itself must not: that opened FirstEdit's windows).
+  if [ ! -x "$OPENER/Contents/MacOS/RollOpen" ]; then
+    echo "  refusing: there is no .roll opener at $OPENER"
+    bad=1
+  else
+    file -b "$OPENER/Contents/MacOS/RollOpen" | grep -q 'Mach-O.*arm64' || { echo "  refusing: the .roll opener is not arm64"; bad=1; }
+    minos=$(xcrun vtool -show-build "$OPENER/Contents/MacOS/RollOpen" 2>/dev/null | awk '/minos/ {print $2; exit}')
+    [ "$minos" = "$MACOS_MIN" ] || { echo "  refusing: the .roll opener is built for macOS ${minos:-?}, not $MACOS_MIN"; bad=1; }
+    /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:LSItemContentTypes:0' "$OPENER/Contents/Info.plist" 2>/dev/null \
+      | grep -qx com.nickcupo.firstedit.roll || { echo "  refusing: the .roll opener does not open .roll"; bad=1; }
+  fi
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes' "$C/Info.plist" >/dev/null 2>&1 \
+    && { echo "  refusing: the app says it opens documents; a .roll would open its windows"; bad=1; }
   return $bad
 }
 
@@ -624,6 +641,11 @@ for ext in $QL_EXTS; do
   # -x would take the class name the extension is found by with it; -S only.
   strip -S "$(qlx $name)/Contents/MacOS/$name" 2>/dev/null || true
 done
+[ -x "$SWIFTBIN/RollOpen" ] || { echo "swift build produced no RollOpen in $SWIFTBIN"; exit 1; }
+mkdir -p "$OPENER/Contents/MacOS"
+sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NO/" app/Resources/RollOpen-Info.plist > "$OPENER/Contents/Info.plist"
+cp "$SWIFTBIN/RollOpen" "$OPENER/Contents/MacOS/RollOpen"
+strip -S -x "$OPENER/Contents/MacOS/RollOpen" 2>/dev/null || true
 fi
 
 if [ "${STAGE:-}" != "dmg" ]; then
@@ -656,6 +678,7 @@ echo "  ${#files} files signed"
 # Inside out: the extensions are sealed into the app's signature, so they are
 # signed first, with their own entitlements.
 for ext in $QL_EXTS; do sign_qlx "$(qlx ${ext%%:*})" || exit 1; done
+sign "$OPENER" || exit 1
 sign "$APP"
 codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | tail -1
 if [ -n "$IDENTITY" ]; then

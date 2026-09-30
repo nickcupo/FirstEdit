@@ -15,7 +15,10 @@ The picture is the camera's own JPEG preview of the kept frame, which is in
 the frame's non-sensor part, turned upright by the ARW's Orientation: the same
 one RollPreview.swift reads. Only the head of the file and that part are read.
 A file that is not downloaded is never opened (opening it would download it).
-The icon is metadata: the file's bytes, and so its checksum, do not change.
+The same picture, upright at the camera's size, is kept beside the icon
+(PICTURE): the space bar and a double-click show it for a file that is not
+downloaded, so looking at one never downloads it. Both are metadata: the
+file's bytes, and so its checksum, do not change.
 """
 from __future__ import annotations
 
@@ -37,6 +40,10 @@ FINDER_INFO = "com.apple.FinderInfo"
 HAS_CUSTOM_ICON = 0x0400
 CUSTOM_ICON_ID = -16455           # kCustomIconResource
 SIZES = (("ic07", 128), ("ic08", 256), ("ic09", 512))
+# The picture itself, upright, as the camera made it (a JPEG): what the space
+# bar and a double-click show of a file that is not downloaded. "#S" marks it
+# for iCloud to carry with the file (xattr_flags.h, XATTR_FLAG_SYNCABLE).
+PICTURE = "com.nickcupo.firstedit.keeper#S"
 
 _MAX_MANIFEST = 64 << 20
 _MAX_FRAME = 1 << 30
@@ -162,16 +169,28 @@ def _tiff_preview(file: bytes, hole: tuple[int, int]) -> tuple[bytes, int] | Non
 
 # ---------------------------------------------------------------- the icon
 
-def icns(jpeg: bytes, orientation: int) -> bytes | None:
-    """An icns of the picture, upright, centred on a clear square."""
+def upright(jpeg: bytes, orientation: int):
+    """The camera's JPEG decoded and turned by the ARW's Orientation, or None."""
     import cv2
     import numpy as np
     img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         return None
     turn = {3: cv2.ROTATE_180, 6: cv2.ROTATE_90_CLOCKWISE, 8: cv2.ROTATE_90_COUNTERCLOCKWISE}.get(orientation)
-    if turn is not None:
-        img = cv2.rotate(img, turn)
+    return img if turn is None else cv2.rotate(img, turn)
+
+
+def picture(img) -> bytes | None:
+    """The upright picture as a JPEG, at the camera's size."""
+    import cv2
+    ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    return jpg.tobytes() if ok else None
+
+
+def icns(img) -> bytes | None:
+    """An icns of the upright picture, centred on a clear square."""
+    import cv2
+    import numpy as np
     body = b""
     for kind, side in SIZES:
         h, w = img.shape[:2]
@@ -234,6 +253,14 @@ def _set(p: Path, name: str, value: bytes) -> None:
         raise OSError(err, os.strerror(err), str(p))
 
 
+def stored_picture(p: Path) -> bytes | None:
+    """The kept frame's picture this file carries, read without its contents."""
+    try:
+        return _get(p, PICTURE)
+    except OSError:
+        return None
+
+
 def has_icon(p: Path) -> bool:
     try:
         info = _get(p, FINDER_INFO)
@@ -243,18 +270,23 @@ def has_icon(p: Path) -> bool:
 
 
 def give_icon(p: Path, archive: bytes | None = None) -> bool:
-    """Give the .roll at p its kept frame as its icon. `archive` is its bytes
-    when the caller has them. False, and nothing written, when p is not
-    downloaded or holds no picture to show; an OSError is not caught."""
+    """Give the .roll at p its kept frame: as its icon, and as the picture
+    the space bar and a double-click show when it is not downloaded.
+    `archive` is its bytes when the caller has them. False, and nothing
+    written, when p is not downloaded or holds no picture to show; an OSError
+    is not caught."""
     p = Path(p)
     if archive is None and dataless(p):
         return False
     found = keeper_preview_of(archive) if archive is not None else keeper_preview(p)
-    icon = icns(*found) if found else None
-    if not icon:
+    img = upright(*found) if found else None
+    icon = icns(img) if img is not None else None
+    jpg = picture(img) if img is not None else None
+    if not icon or not jpg:
         return False
     info = bytearray((_get(p, FINDER_INFO) or b"").ljust(32, b"\0")[:32])
     struct.pack_into(">H", info, 8, struct.unpack_from(">H", info, 8)[0] | HAS_CUSTOM_ICON)
+    _set(p, PICTURE, jpg)
     _set(p, RESOURCE_FORK, resource_fork(icon))
     _set(p, FINDER_INFO, bytes(info))
     return True
@@ -264,7 +296,8 @@ def give_icon(p: Path, archive: bytes | None = None) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="Give packed bursts their kept frame as their Finder icon.")
+    ap = argparse.ArgumentParser(description="Give packed bursts their kept frame: their Finder icon, "
+                                             "and the picture shown when they are not downloaded.")
     ap.add_argument("paths", nargs="+", type=Path, help=".roll files, or folders holding them")
     ap.add_argument("--again", action="store_true", help="also those that have one already")
     a = ap.parse_args(argv)
@@ -274,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
         files += sorted(q for q in p.rglob(f"*{EXT}") if not q.name.startswith(".")) if p.is_dir() else [p]
     given = had = far = bad = 0
     for q in files:
-        if not a.again and has_icon(q):
+        if not a.again and has_icon(q) and stored_picture(q):
             had += 1
         elif dataless(q):
             far += 1                  # opening it would download it

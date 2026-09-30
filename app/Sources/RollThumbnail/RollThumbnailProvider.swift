@@ -5,7 +5,8 @@ import QuickLookThumbnailing
 import RollPreview
 
 /// Finder's thumbnail for a packed burst: the camera's preview of the frame
-/// you kept, turned upright. Nothing is unpacked; see RollPreview.
+/// you kept, turned upright. Nothing is unpacked, and a file iCloud has
+/// evicted is not downloaded: see RollPreview.picture(at:).
 @objc(RollThumbnailProvider)
 final class RollThumbnailProvider: QLThumbnailProvider {
 
@@ -14,7 +15,7 @@ final class RollThumbnailProvider: QLThumbnailProvider {
     override func provideThumbnail(for request: QLFileThumbnailRequest,
                                    _ handler: @escaping (QLThumbnailReply?, Error?) -> Void) {
         let most = max(request.maximumSize.width, request.maximumSize.height) * max(request.scale, 1)
-        guard let p = RollPreview.keeper(at: request.fileURL),
+        guard let p = RollPreview.picture(at: request.fileURL),
               let image = RollPreview.image(p, maxPixels: most) else {
             handler(nil, Failure.noPreview)
             return

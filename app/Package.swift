@@ -22,6 +22,7 @@ let package = Package(
         .executable(name: "SnapshotHarness", targets: ["SnapshotHarness"]),
         .executable(name: "RollThumbnail", targets: ["RollThumbnail"]),
         .executable(name: "RollQuickLook", targets: ["RollQuickLook"]),
+        .executable(name: "RollOpen", targets: ["RollOpen"]),
     ],
     targets: [
         // Thin on purpose: the app target is an entry point and a delegate.
@@ -49,6 +50,11 @@ let package = Package(
                                                         "-Xfrontend", "roll_thumbnail_unused_main"])],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
                                                          "-Xlinker", "-application_extension"])]),
+        // A double-click on a .roll: "Open Packed Burst.app", a helper inside
+        // FirstEdit.app that hands the kept frame to Preview, so opening one
+        // never opens FirstEdit.
+        .executableTarget(name: "RollOpen", dependencies: ["RollPreview"],
+                          swiftSettings: [.swiftLanguageMode(.v5)]),
         // The space bar's preview, built the same way: RollQuickLook.appex.
         .executableTarget(name: "RollQuickLook", dependencies: ["RollPreview"],
                           swiftSettings: [.swiftLanguageMode(.v5),

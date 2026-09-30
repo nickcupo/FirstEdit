@@ -57,6 +57,9 @@ def test_the_icon_is_the_kept_frame_upright_and_the_file_is_unchanged(tmp_path):
     assert rollicon.give_icon(p)
     assert rollicon.has_icon(p)
     assert p.read_bytes() == before, "metadata only: the bytes, and so the checksum, are as packed"
+    jpg = rollicon.stored_picture(p)
+    img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+    assert img.shape[0] > img.shape[1], "the stored picture stands upright too"
     pngs = _icon_pngs(p)
     assert sorted(pngs) == ["ic07", "ic08", "ic09"]
     for kind, side in rollicon.SIZES:
