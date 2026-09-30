@@ -764,6 +764,22 @@ def test_the_pool_takes_a_burst_only_as_a_worker_comes_free(tmp_path):
     assert sorted(ended) == [(f"b{i}", None) for i in range(5)]
 
 
+def test_every_packed_burst_written_is_given_its_icon(tmp_path, monkeypatch):
+    """Here, and each copy into iCloud, which a copy would otherwise leave without one."""
+    import archive
+    import rollicon
+    given: list[str] = []
+    monkeypatch.setattr(rollicon, "give_icon", lambda p, archive=None: given.append(Path(p).name) or True)
+    monkeypatch.setattr(bp, "_workers", lambda n, size: 1)       # in this process, where the patch is
+    shoot = _shoot(tmp_path)
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    assert archive.push(shoot, apply=True, form="packed") == 0
+    here = [n for n in given if n.startswith(".burst-") and n.endswith(".tmp")]
+    up = [n for n in given if n.endswith(".roll.part")]
+    assert len(here) == 2, "each written in packed/ on this Mac"
+    assert sorted(up) == [".burst-0.roll.part", ".burst-1.roll.part"], "and each copy up, before it takes its name"
+
+
 def test_the_sheet_reads_the_repack_list(tmp_path, monkeypatch, capsys):
     studio = pytest.importorskip("studio")
     import archive

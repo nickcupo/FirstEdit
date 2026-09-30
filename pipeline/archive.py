@@ -660,6 +660,7 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
                 print(f"    {q.name}: copied wrong, left alone")
                 failed += len(inside)
                 continue
+            _burstpack().give_icon(tmp)      # a copy does not carry the icon; iCloud keeps it on eviction
             os.replace(tmp, d)
             man["packed"][q.name] = {
                 "bytes": q.stat().st_size, "sha256": want,
@@ -1527,6 +1528,7 @@ def repack(shoot: Path, apply: bool) -> int:
                 failed += len(names)
                 print(f"    {file}: copied wrong, left alone", flush=True)
                 return
+            bp.give_icon(tmp)                # a copy does not carry the icon; iCloud keeps it on eviction
             os.replace(tmp, q)
             packs[file] = {"bytes": out.stat().st_size, "sha256": want,
                            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

@@ -1135,11 +1135,25 @@ def pack(paths: list[Path], out: Path, key: str | None = None, log=print) -> dic
             fh.write(archive)
             fh.flush()
             os.fsync(fh.fileno())
+        give_icon(Path(tmp), archive)
         os.replace(tmp, out)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
     return manifest
+
+
+def give_icon(p: Path, archive: bytes | None = None) -> None:
+    """The kept frame as the file's Finder icon (rollicon.py), which it keeps
+    when iCloud evicts it. Only a picture: a file that cannot have one is
+    written all the same."""
+    try:
+        if str(_here()) not in sys.path:
+            sys.path.insert(0, str(_here()))
+        import rollicon  # noqa: E402
+        rollicon.give_icon(p, archive)
+    except Exception:
+        pass
 
 
 def read_manifest(archive: bytes) -> tuple[dict, int]:
