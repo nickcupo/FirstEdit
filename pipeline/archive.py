@@ -450,6 +450,48 @@ def _clear_parts(shoot: Path) -> None:
             print(f"    removed {t.name}, a copy an earlier run never finished")
 
 
+def clear_strays(shoots: Path) -> list[str]:
+    """What an interrupted pack left anywhere, cleared: the unfinished copies
+    in iCloud (_clear_parts) and, in each shoot, the half-written packs and
+    the staging folder a repack packs into. A run cleans up after itself when
+    it can, and the next run of the same job on the same shoot clears what it
+    could not; a shoot that is never packed again kept them - in iCloud Drive,
+    uploaded against his storage. Only these names, which nothing but a pack
+    writes, and nothing is opened, so nothing iCloud has evicted is fetched.
+    For the engine to run when it starts and no job of its own is running.
+    Returns what went, for its log."""
+    gone: list[str] = []
+
+    def drop(t: Path) -> None:
+        try:
+            t.unlink()
+            gone.append(str(t))
+        except OSError:
+            pass
+
+    for shoot in (sorted(d for d in shoots.iterdir() if d.is_dir()) if shoots.is_dir() else []):
+        packed = shoot / PACKED
+        if not packed.is_dir():
+            continue
+        for t in [*packed.glob(".burst-*.roll.*.tmp"), *packed.glob(".frame-*.roll.*.tmp")]:
+            drop(t)
+        stage = packed / ".staging"
+        if stage.is_dir():
+            for t in stage.iterdir():
+                drop(t)
+            try:
+                stage.rmdir()
+                gone.append(str(stage))
+            except OSError:
+                pass
+    if ICLOUD.is_dir() and ARCHIVE.is_dir():
+        for up in sorted(d for d in ARCHIVE.iterdir() if d.is_dir()):
+            for d in (up, up / PACKED):
+                for t in (d.glob(".*.part") if d.is_dir() else []):
+                    drop(t)
+    return gone
+
+
 def packed_frames(man: dict) -> dict[str, tuple[str, dict]]:
     """Every frame recorded in a packed file up there: name -> (file, frame record)."""
     out: dict[str, tuple[str, dict]] = {}

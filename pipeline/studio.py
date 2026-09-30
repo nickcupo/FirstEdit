@@ -2403,6 +2403,11 @@ class Jobs:
         # seeing it end, if there was one; and the history, trimmed.
         self._cut_off()
         self._prune_history()
+        # And what an interrupted pack left behind, in any shoot: only once no
+        # job of ours can still be writing - its note gone because it was put
+        # down or ended - and never while another engine's job runs.
+        if not self.running_store().exists():
+            threading.Thread(target=_clear_strays, daemon=True).start()
         with self.lock:
             if self.queue:
                 self.asked = len(self.queue)
@@ -3358,6 +3363,16 @@ def readable_log(log) -> str:
              if l.strip() and "WARN:" not in l and "HF_TOKEN" not in l]
     return "\n".join(w for l in lines if not l.startswith("@@ ")
                      for w in [plan_words(l)] if w is not None)[-8000:]
+
+
+def _clear_strays() -> None:
+    """archive.clear_strays over this library, said in the engine's log."""
+    try:
+        import archive as amod
+        for t in amod.clear_strays(shoots_dir()):
+            print(f"removed {t}, left by a pack that was cut short", flush=True)
+    except Exception as e:  # noqa: BLE001 - tidying never stops the engine
+        print(f"could not tidy after interrupted packs: {e}", flush=True)
 
 
 def _put_down(pid: int, script: str, wait: float = 5.0) -> bool:

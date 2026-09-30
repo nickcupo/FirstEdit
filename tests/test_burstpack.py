@@ -848,6 +848,35 @@ def test_copies_a_run_never_finished_are_cleared_from_icloud(tmp_path, monkeypat
     assert "removed .TSC01000.ARW.part, a copy an earlier run never finished" in out
 
 
+def test_the_engine_clears_what_packs_cut_short_left_in_every_shoot(tmp_path, monkeypatch):
+    """A shoot nobody packs again kept its strays for good, one in iCloud
+    uploaded against his storage; the engine clears them when it starts."""
+    import archive
+    monkeypatch.setattr(archive, "ICLOUD", tmp_path / "icloud")
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud" / "Photo Pipeline Archive")
+    shoots = tmp_path / "photos" / "shoots"
+    kept = []
+    for name in ("2026-01-01-lake", "2026-01-02-gym"):
+        packed = shoots / name / "packed"
+        (packed / ".staging").mkdir(parents=True)
+        (packed / ".staging" / "burst-3.roll").write_bytes(b"half")
+        (packed / ".burst-4.roll.abc123.tmp").write_bytes(b"half")
+        (packed / "burst-1.roll").write_bytes(b"a finished pack")
+        up = archive.ARCHIVE / name
+        (up / "packed").mkdir(parents=True)
+        (up / ".TSC01000.ARW.part").write_bytes(b"half")
+        (up / "packed" / ".burst-2.roll.part").write_bytes(b"half")
+        (up / "packed" / "burst-1.roll").write_bytes(b"a finished pack")
+        (up / "TSC01001.ARW").write_bytes(b"a finished copy")
+        kept += [packed / "burst-1.roll", up / "packed" / "burst-1.roll", up / "TSC01001.ARW"]
+    gone = archive.clear_strays(shoots)
+    assert len(gone) == 2 * 5, "four files and the staging folder, in each of two shoots"
+    assert all(p.exists() for p in kept), "nothing finished is touched"
+    left = [p for p in tmp_path.rglob("*") if p.name.startswith(".")]
+    assert not left
+    assert archive.clear_strays(shoots) == [], "and a second time there is nothing"
+
+
 def test_the_sheet_reads_the_repack_list(tmp_path, monkeypatch, capsys):
     studio = pytest.importorskip("studio")
     import archive
