@@ -5,6 +5,9 @@
        (Contents/PlugIns/RollThumbnail.appex). Its identifier has to start
        with the app's, and its version is the app's: app/build.sh fills both
        placeholders from the same numbers. -->
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
   <key>CFBundleName</key><string>RollThumbnail</string>
   <key>CFBundleDisplayName</key><string>FirstEdit Packed Burst Thumbnails</string>
   <key>CFBundleIdentifier</key><string>com.nickcupo.firstedit.roll-thumbnail</string>
