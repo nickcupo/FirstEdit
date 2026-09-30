@@ -12,11 +12,28 @@ iCloud) is unpacked into a temporary folder, checked, and the previews and
 decode are made from it. One unpack does a whole burst's thumbnails. The RAW
 is not put back into the shoot; Bring Back from iCloud does that.
 
-Packed bursts show the kept frame in Finder. The app declares `.roll` as its
-own file type and carries a Quick Look extension (Contents/PlugIns/
-RollThumbnail.appex) that reads the camera's preview of the kept frame
-straight out of the file, without unpacking a RAW. Open the app once from
-/Applications for Finder to find it.
+Packed bursts show the frame you kept in Finder: as their icon, under the
+space bar, and on a double-click. The icon and the space bar are two Quick
+Look extensions (Contents/PlugIns/RollThumbnail.appex and
+RollQuickLook.appex) that read the camera's preview of the kept frame
+straight out of the file, turned upright, without unpacking a RAW. A
+double-click runs Open Packed Burst (Contents/Helpers), which hands the kept
+frame's RAW, unpacked and checked, to Preview and quits; it never opens
+FirstEdit or its windows.
+
+A packed burst that iCloud has evicted still shows it, and nothing is
+downloaded to do so. Every `.roll` is now written carrying its kept frame as
+its Finder icon and, beside it, the picture itself, in its extended
+attributes, which stay on this Mac when the file's contents do not; the
+space bar and a double-click show that picture. The file's bytes, and so its
+checksum, do not change. For packed bursts written before this version:
+`./pl rollicon <folder>` (downloaded ones only).
+
+Pack in iCloud packs bursts side by side on three quarters of the cores, as
+packing on this Mac already did, where it packed one at a time on one core:
+a shoot of a thousand frames takes minutes, not hours. Fetching and checking
+each burst's ARWs, the copy up, the read back and the record stay one at a
+time; on twelve real bursts the packed files were byte for byte the same.
 
 Install and Relaunch no longer leaves the app open without its engine. The
 update sheet stayed up over the window, and the quit asked the engine, which
