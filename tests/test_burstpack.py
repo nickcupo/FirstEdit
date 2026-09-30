@@ -801,6 +801,36 @@ def test_bursts_are_recorded_as_they_finish_while_the_next_are_still_being_fetch
         "a finished burst is recorded before the last one is even fetched"
 
 
+def test_pack_in_icloud_downloads_several_bursts_at_once(tmp_path, monkeypatch, capsys):
+    """iCloud cannot pack; each ARW comes down first. One at a time, the
+    download was the whole of the wait and most cores sat idle."""
+    import threading
+    import time
+    import archive
+    shoot = _in_icloud_only(tmp_path, monkeypatch)
+    now = [0]
+    most = [0]
+    lock = threading.Lock()
+
+    def slow_download(p, timeout=600.0, poll=0.5, stop=None):
+        with lock:
+            now[0] += 1
+            most[0] = max(most[0], now[0])
+        time.sleep(1)
+        with lock:
+            now[0] -= 1
+        return True
+
+    monkeypatch.setattr(archive, "local", lambda p: False)          # every ARW is up there only
+    monkeypatch.setattr(archive, "materialise", slow_download)
+    monkeypatch.setattr(bp, "_workers", lambda n, size: 2)
+    assert archive.repack(shoot, apply=True) == 0
+    assert most[0] == 2, "both bursts fetched at once"
+    up = tmp_path / "icloud" / shoot.name
+    assert sorted(p.name for p in (up / "packed").iterdir()) == ["burst-0.roll", "burst-1.roll"]
+    assert "Packed 5 frames in iCloud" in capsys.readouterr().out
+
+
 _STOPPED_MIDWAY = """
 import sys
 from pathlib import Path

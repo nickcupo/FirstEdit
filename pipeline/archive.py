@@ -78,6 +78,7 @@ import os
 import shutil
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -108,6 +109,8 @@ ICLOUD = Path(os.environ.get(
 ARCHIVE_NAME = "Photo Pipeline Archive"
 ARCHIVE = ICLOUD / ARCHIVE_NAME
 CHUNK = 1 << 20
+# How many bursts Pack in iCloud downloads from iCloud at once.
+FETCHERS = 6
 MANIFEST = "archive.json"
 
 
@@ -140,7 +143,7 @@ def local(p: Path) -> bool:
     return st.st_size == 0 or st.st_blocks > 0
 
 
-def materialise(p: Path, timeout: float = 600.0, poll: float = 0.5) -> bool:
+def materialise(p: Path, timeout: float = 600.0, poll: float = 0.5, stop=None) -> bool:
     """Ask macOS for the bytes of an evicted file and wait for them.
 
     Opening it is the request: the read blocks while FileProvider fetches it.
@@ -161,7 +164,7 @@ def materialise(p: Path, timeout: float = 600.0, poll: float = 0.5) -> bool:
         # 33 hours to print the same line 198 times.
         return False
     end = time.time() + timeout
-    while time.time() < end:
+    while time.time() < end and not (stop is not None and stop.is_set()):
         if local(p):
             return True
         time.sleep(poll)
@@ -1531,45 +1534,81 @@ def repack(shoot: Path, apply: bool) -> int:
     steps, step = len(todo) + len(covered), 0
     packed_n = failed = 0
     progress("repack", 0, steps)
-    # The packing itself is what takes the time (a minute a burst on one
-    # core), so bursts are packed side by side, as pack_shoot does. Everything
-    # that touches iCloud or the manifest stays here, one burst at a time:
-    # fetching and checking a burst's ARWs as it is handed to a worker, and,
-    # as each comes back, the copy up, the read back and the record.
+    # The packing itself takes a minute a burst on one core, so bursts are
+    # packed side by side, as pack_shoot does. Before that, a burst whose ARWs
+    # are only in iCloud has to be downloaded - iCloud stores, it cannot pack -
+    # and one download at a time left most of the cores waiting on it, so
+    # FETCHERS bursts are fetched and checked at once, in threads, a bounded
+    # way ahead of the packing and handed to it in order. What writes to
+    # iCloud or the manifest stays here, one burst at a time: as each comes
+    # back, the copy up, the read back and the record.
     inflight: dict[str, tuple[list[str], str, Path]] = {}   # gid -> names, file, staged output
+    giving_up = threading.Event()
+
+    def fetch(names: list[str]) -> tuple[list[Path], str]:
+        """A burst's ARWs, each here and checked against its record, or why not."""
+        srcs: list[Path] = []
+        for n in names:
+            if giving_up.is_set():
+                return [], "stopped"
+            p, d = raw / n, dest_for(shoot, n)
+            if local(p) and _same_bytes(p, man[n]):
+                srcs.append(p)
+                continue
+            if not local(d) and not materialise(d, stop=giving_up):
+                return [], f"iCloud did not hand {n} over"
+            if not _same_bytes(d, man[n]):
+                return [], f"the ARW of {n} in iCloud does not match what was pushed"
+            srcs.append(d)
+        return srcs, ""
 
     def jobs():
         nonlocal step, failed
-        for gid, names, key in groups:
-            srcs, why = [], ""
-            for n in names:
-                p, d = raw / n, dest_for(shoot, n)
-                if local(p) and _same_bytes(p, man[n]):
-                    srcs.append(p)
-                    continue
-                if not local(d) and not materialise(d):
-                    why = f"iCloud did not hand {n} over"
-                    break
-                if not _same_bytes(d, man[n]):
-                    why = f"the ARW of {n} in iCloud does not match what was pushed"
-                    break
-                srcs.append(d)
-            if why:
-                failed += len(names)
-                step += len(names)
-                progress("repack", step, steps)
-                print(f"    {gid}: not packed: {why}", flush=True)
-                continue
-            file = f"{gid}{bp.EXT}"
-            i = 2
-            taken = {f for _, f, _ in inflight.values()}
-            while file in packs or file in taken or packed_dest(shoot, file).exists():
-                file, i = f"{gid}-{i}{bp.EXT}", i + 1
-            stage.mkdir(parents=True, exist_ok=True)
-            out = stage / file
-            out.unlink(missing_ok=True)
-            inflight[gid] = (names, file, out)
-            yield gid, srcs, key, out           # packed and proved by unpacking before it is written
+        from collections import deque
+        from concurrent.futures import ThreadPoolExecutor
+        fetchers = ThreadPoolExecutor(max_workers=FETCHERS, thread_name_prefix="fetch")
+        ahead: deque = deque()
+        todo = iter(groups)
+
+        def top_up() -> None:
+            while len(ahead) < workers + FETCHERS:
+                g = next(todo, None)
+                if g is None:
+                    return
+                ahead.append((g, fetchers.submit(fetch, g[1])))
+
+        try:
+            top_up()
+            while ahead:
+                (gid, names, key), got = ahead.popleft()
+                srcs, why = got.result()
+                top_up()
+                yield from _one(gid, names, key, srcs, why)
+        finally:
+            # A Stop: the downloads give up rather than hold the way out.
+            giving_up.set()
+            fetchers.shutdown(wait=False, cancel_futures=True)
+
+    def _one(gid: str, names: list[str], key, srcs: list[Path], why: str):
+        """One fetched burst: said and counted when it could not be fetched,
+        else named, staged and handed to a packer."""
+        nonlocal step, failed
+        if why:
+            failed += len(names)
+            step += len(names)
+            progress("repack", step, steps)
+            print(f"    {gid}: not packed: {why}", flush=True)
+            return
+        file = f"{gid}{bp.EXT}"
+        i = 2
+        taken = {f for _, f, _ in inflight.values()}
+        while file in packs or file in taken or packed_dest(shoot, file).exists():
+            file, i = f"{gid}-{i}{bp.EXT}", i + 1
+        stage.mkdir(parents=True, exist_ok=True)
+        out = stage / file
+        out.unlink(missing_ok=True)
+        inflight[gid] = (names, file, out)
+        yield gid, srcs, key, out           # packed and proved by unpacking before it is written
 
     def finish(gid: str, _before: int, _after: int, err: str | None) -> None:
         nonlocal step, failed, packed_n
