@@ -42,12 +42,15 @@ let package = Package(
         // no symbol called main: NSExtensionMain calls the executable's main
         // once the extension is up, so a main that called NSExtensionMain
         // itself went round until the stack ran out. Swift's top-level code is
-        // renamed out of the way instead.
+        // renamed out of the way instead, to <Target>_main: the name an older
+        // SwiftPM (Xcode 26.6, which CI has) links every executable against,
+        // and aliases back to main. Such a build links, and build.sh's gate
+        // refuses to ship it for having a main.
         .target(name: "RollPreview"),
         .executableTarget(name: "RollThumbnail", dependencies: ["RollPreview"],
                           swiftSettings: [.swiftLanguageMode(.v5),
                                           .unsafeFlags(["-Xfrontend", "-entry-point-function-name",
-                                                        "-Xfrontend", "roll_thumbnail_unused_main"])],
+                                                        "-Xfrontend", "RollThumbnail_main"])],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
                                                          "-Xlinker", "-application_extension"])]),
         // A double-click on a .roll: "Open Packed Burst.app", a helper inside
@@ -59,7 +62,7 @@ let package = Package(
         .executableTarget(name: "RollQuickLook", dependencies: ["RollPreview"],
                           swiftSettings: [.swiftLanguageMode(.v5),
                                           .unsafeFlags(["-Xfrontend", "-entry-point-function-name",
-                                                        "-Xfrontend", "roll_quicklook_unused_main"])],
+                                                        "-Xfrontend", "RollQuickLook_main"])],
                           linkerSettings: [.unsafeFlags(["-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
                                                          "-Xlinker", "-application_extension"])]),
         .testTarget(

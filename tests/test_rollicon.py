@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
 import rollicon  # noqa: E402
 
+pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="a Finder icon and its extended attributes are macOS's")
 cv2 = pytest.importorskip("cv2")
 FIXTURE = ROOT / "app/Tests/PipelineKitTests/Fixtures/Roll"
 

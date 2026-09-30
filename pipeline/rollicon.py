@@ -236,7 +236,7 @@ def _get(p: Path, name: str) -> bytes | None:
     n = _libc.getxattr(path, key, None, 0, 0, XATTR_NOFOLLOW)
     if n < 0:
         err = ctypes.get_errno()
-        if err == errno.ENOATTR:
+        if err == getattr(errno, "ENOATTR", errno.ENODATA):     # macOS; Linux calls it ENODATA
             return None
         raise OSError(err, os.strerror(err), str(p))
     buf = ctypes.create_string_buffer(n)
