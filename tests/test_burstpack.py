@@ -757,7 +757,7 @@ def test_the_pool_takes_a_burst_only_as_a_worker_comes_free(tmp_path):
     def jobs():
         for i in range(5):
             handed.append(i)
-            assert len(handed) - len(ended) <= 3, "two workers and one waiting, never more"
+            assert len(handed) - len(ended) <= 2, "one burst for each of two workers, never more"
             yield f"b{i}", paths[2 * i:2 * i + 2], None, tmp_path / f"b{i}{bp.EXT}"
 
     bp._pack_parallel(jobs(), 2, lambda _line: None, lambda bid, b, a, err: ended.append((bid, err)))
@@ -778,6 +778,74 @@ def test_every_packed_burst_written_is_given_its_icon(tmp_path, monkeypatch):
     up = [n for n in given if n.endswith(".roll.part")]
     assert len(here) == 2, "each written in packed/ on this Mac"
     assert sorted(up) == [".burst-0.roll.part", ".burst-1.roll.part"], "and each copy up, before it takes its name"
+
+
+_STOPPED_MIDWAY = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from common import stop_cleanly_on_sigterm
+stop_cleanly_on_sigterm()
+import burstpack as bp
+jobs = [(f"b{i}", [Path(f)], None, Path(sys.argv[2]) / f"b{i}.roll") for i, f in enumerate(sys.argv[3:])]
+print("packing", flush=True)
+bp._pack_parallel(jobs, 3, lambda _line: None, lambda *_: None)
+"""
+
+
+def test_a_stop_ends_a_pack_on_many_cores_at_once(tmp_path):
+    """The studio's Stop is SIGTERM to every process of the job. Each worker
+    here is stuck reading a pipe nobody writes to, and one core has nothing to
+    do: under multiprocessing.Pool that idle worker died holding the queue's
+    lock and the pack never ended."""
+    import os
+    import signal
+    import subprocess
+    import time
+    fifos = []
+    for i in range(2):
+        f = tmp_path / f"TSC0{i}.ARW"
+        os.mkfifo(f)
+        fifos.append(str(f))
+    p = subprocess.Popen([sys.executable, "-c", _STOPPED_MIDWAY, str(bp._here()), str(tmp_path), *fifos],
+                         stdout=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        assert p.stdout.readline().strip() == "packing"
+        time.sleep(3)                                    # the workers are up and stuck
+        os.killpg(p.pid, signal.SIGTERM)
+        p.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        pytest.fail("the pack did not end after Stop")
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    time.sleep(0.5)
+    with pytest.raises((ProcessLookupError, PermissionError)):
+        os.killpg(p.pid, 0)                              # and nothing of it is left running
+    assert not list(tmp_path.glob("*.roll"))
+
+
+def test_copies_a_run_never_finished_are_cleared_from_icloud(tmp_path, monkeypatch, capsys):
+    """A .part is a copy that never took its name: the app force-quit or the
+    Mac off mid-copy. Left in iCloud Drive it is uploaded as a file of its own."""
+    import archive
+    shoot = _in_icloud_only(tmp_path, monkeypatch)
+    up = tmp_path / "icloud" / shoot.name
+    (up / "packed").mkdir(exist_ok=True)
+    stray = [up / ".TSC01000.ARW.part", up / "packed" / ".burst-7.roll.part"]
+    for t in stray:
+        t.write_bytes(b"half a copy")
+    assert archive.repack(shoot, apply=False) == 0
+    assert all(t.exists() for t in stray), "only a run that writes clears them"
+    capsys.readouterr()
+    assert archive.repack(shoot, apply=True) == 0
+    out = capsys.readouterr().out
+    assert not any(t.exists() for t in stray)
+    assert sorted(p.name for p in (up / "packed").iterdir()) == ["burst-0.roll", "burst-1.roll"]
+    assert "removed .burst-7.roll.part, a copy an earlier run never finished" in out
+    assert "removed .TSC01000.ARW.part, a copy an earlier run never finished" in out
 
 
 def test_the_sheet_reads_the_repack_list(tmp_path, monkeypatch, capsys):

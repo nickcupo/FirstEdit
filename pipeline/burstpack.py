@@ -1446,68 +1446,74 @@ def _pack_one(job: tuple, log) -> tuple[str, int, int, str | None]:
     return bid, sum(f["size"] for f in m["frames"]), out.stat().st_size, None
 
 
-_LINES = None
-
-
-def _worker_start(q) -> None:
-    global _LINES
-    _LINES = q
-    # The studio's Stop sends SIGTERM to the whole group; a worker just ends,
-    # and the parent's pool, unwinding, takes the rest down.
-
-
-def _worker_pack(job: tuple) -> tuple[str, int, int, str | None]:
-    return _pack_one(job, _LINES.put)
+def _worker_run(job: tuple, conn) -> None:
+    """One burst, in a process of its own: its lines, then how it ended, on
+    its own pipe."""
+    try:
+        conn.send(("done", _pack_one(job, lambda line: conn.send(("line", line)))))
+    finally:
+        conn.close()
 
 
 def _pack_parallel(jobs, workers: int, tick, ended) -> None:
-    """Bursts on separate processes. Each burst is one worker's from start to
+    """Bursts on separate processes. Each burst is one process's from start to
     finish, so the frames of a burst are still packed in their order; only
     whole bursts run side by side. Every line a worker prints comes back here,
     so the progress bar and the log are the same as a run on one core.
 
-    `jobs` is read only as workers come free, with one waiting beside them:
-    archive.repack hands over a generator that fetches a burst's ARWs from
-    iCloud as it yields it, and that should run just ahead of the packing,
-    not download the whole shoot before the first burst starts."""
+    Each process has a pipe of its own, not a share of a pool's queue. The
+    studio's Stop sends SIGTERM to every process of the job at once, and a
+    multiprocessing.Pool's worker that died waiting on the shared queue died
+    holding its lock: the pool's shutdown then waited for that lock for ever,
+    and a stopped pack never ended. A pipe ends when its one process does,
+    whatever it was doing, and here any still running are killed on the way out.
+
+    `jobs` is read only as a worker comes free: archive.repack hands over a
+    generator that fetches a burst's ARWs from iCloud as it yields it, and
+    that should run just ahead of the packing, not download the whole shoot
+    before the first burst starts."""
     import multiprocessing as mp
-    import queue
+    from multiprocessing.connection import wait
     ctx = mp.get_context("spawn")
-    q = ctx.Queue()
     todo = iter(jobs)
-
-    def lines() -> None:
-        while True:
-            try:
-                tick(q.get_nowait())
-            except queue.Empty:
-                return
-
-    with ctx.Pool(workers, initializer=_worker_start, initargs=(q,)) as pool:
-        pending: list = []
-        more = True
-        while pending or more:
-            while more and len(pending) <= workers:
+    running: dict = {}                      # its pipe -> (process, job)
+    more = True
+    try:
+        while running or more:
+            while more and len(running) < workers:
                 job = next(todo, None)
                 if job is None:
                     more = False
+                    break
+                r, w = ctx.Pipe(duplex=False)
+                p = ctx.Process(target=_worker_run, args=(job, w), daemon=True)
+                p.start()
+                w.close()                   # so the pipe ends when the process does
+                running[r] = (p, job)
+            for r in wait(list(running)):
+                p, job = running[r]
+                try:
+                    kind, what = r.recv()
+                except (EOFError, OSError):
+                    # Ended without saying how: killed, or out of memory.
+                    p.join()
+                    del running[r]
+                    r.close()
+                    ended(job[0], 0, 0, f"its packing process ended without finishing (exit {p.exitcode})")
+                    continue
+                if kind == "line":
+                    tick(what)
                 else:
-                    pending.append(pool.apply_async(_worker_pack, (job,)))
-            if not pending:
-                break
-            try:
-                tick(q.get(timeout=0.25))
-            except queue.Empty:
-                pass
-            still = []
-            for r in pending:
-                if r.ready():
-                    lines()                # its own lines first, then how it ended
-                    ended(*r.get())
-                else:
-                    still.append(r)
-            pending = still
-    lines()
+                    del running[r]
+                    r.close()
+                    p.join()
+                    ended(*what)
+    finally:
+        for p, _ in running.values():
+            p.kill()
+        for r, (p, _) in running.items():
+            p.join(5)
+            r.close()
 
 
 def check_shoot(shoot: Path, log=print) -> int:

@@ -437,6 +437,19 @@ def packed_dest(shoot: Path, file: str) -> Path:
     return ARCHIVE / Path(shoot).name / PACKED / file
 
 
+def _clear_parts(shoot: Path) -> None:
+    """A copy into iCloud lands as .<name>.part and takes its name only once
+    it has been read back. One that was never finished - the app force-quit,
+    the Mac off mid-copy, anything a Stop could not unwind - is left in iCloud
+    Drive to be uploaded as a file of its own, and nothing else ever removes
+    it. This module is the only thing that writes one, and only one job at a
+    time runs on a shoot, so any here when a job starts are strays."""
+    for d in (ARCHIVE / Path(shoot).name, ARCHIVE / Path(shoot).name / PACKED):
+        for t in (d.glob(".*.part") if d.is_dir() else []):
+            t.unlink(missing_ok=True)
+            print(f"    removed {t.name}, a copy an earlier run never finished")
+
+
 def packed_frames(man: dict) -> dict[str, tuple[str, dict]]:
     """Every frame recorded in a packed file up there: name -> (file, frame record)."""
     out: dict[str, tuple[str, dict]] = {}
@@ -542,6 +555,8 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
     if bad:
         print(f"  {bad}")
         return 1
+    if apply:
+        _clear_parts(shoot)
     raw, _ = parts(shoot)
     if not raw.is_dir():
         print(f"  no such shoot: {shoot}")
@@ -1435,6 +1450,8 @@ def repack(shoot: Path, apply: bool) -> int:
     if bad:
         print(f"  {bad}")
         return 1
+    if apply:
+        _clear_parts(shoot)
     raw, _ = parts(shoot)
     whole = load_manifest(shoot)
     man = whole.setdefault("frames", {})
