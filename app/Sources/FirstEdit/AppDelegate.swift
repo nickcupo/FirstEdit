@@ -1,4 +1,5 @@
 import AppKit
+import CoreServices
 import SwiftUI
 import PipelineKit
 
@@ -91,6 +92,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Two support folders, and the one in use has no work in it: said
         // once, after the first window.
         FirstLaunch.afterLaunch()
+        Self.registerRollOpener()
+    }
+
+    /// What a double-click on a .roll runs is a helper inside this bundle
+    /// (Contents/Helpers/Open Packed Burst.app), and macOS does not always
+    /// register an app nested in another by itself. Registering it again is
+    /// harmless; without it a .roll opens with nothing.
+    private static func registerRollOpener() {
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/Open Packed Burst.app")
+        guard FileManager.default.fileExists(atPath: helper.path) else { return }
+        DispatchQueue.global(qos: .utility).async { _ = LSRegisterURL(helper as CFURL, true) }
     }
 
     /// Every crew's pages, in one place and in this order.
