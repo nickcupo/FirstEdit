@@ -50,7 +50,7 @@ public struct PlanSheet: View {
         self.close = close
         _includeOnlyCopies = State(initialValue: includeOnlyCopies)
         _form = State(initialValue: request.options.form
-                      ?? (request.what == "trim" ? "both" : request.what == "free" ? "mac" : "raw"))
+                      ?? (request.what == "trim" ? "both" : request.what == "free" ? "mac" : "packed"))
     }
 
     /// One choice of form: the engine's word and the one he reads.
@@ -63,8 +63,8 @@ public struct PlanSheet: View {
     private var formChoices: [FormChoice] {
         switch request.what {
         case "push":
-            return [FormChoice(tag: "raw", label: Strings.Storage.asRAW),
-                    FormChoice(tag: "packed", label: Strings.Storage.asPacked)]
+            return [FormChoice(tag: "packed", label: Strings.Storage.asPacked),
+                    FormChoice(tag: "raw", label: Strings.Storage.asRAW)]
         case "trim":
             return [FormChoice(tag: "raw", label: Strings.Storage.rawCopies),
                     FormChoice(tag: "packed", label: Strings.Storage.packedCopies),

@@ -1,4 +1,5 @@
 import AppKit
+import CoreServices
 import SwiftUI
 import PipelineKit
 
@@ -29,9 +30,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          memory: Self.smoke ? nil : .shared, observeCards: !Self.offscreenSmoke)
         super.init()
         displays = DisplayDirector(settings: .shared, pump: nil, jobs: model.jobs, screens: screens)
-        model.onQuitRequested = {
+        model.onQuitRequested = { [weak self] in
             // The updater printed QUIT: an update is about to swap the app.
-            NSApp.terminate(nil)
+            self?.quitForUpdate()
+        }
+    }
+
+    /// The engine has already gone and the installer is waiting for this
+    /// process to end. A plain terminate stalled here: the update sheet was
+    /// still up over the window, and the ⌘Q check asked the engine, which was
+    /// gone, whether a job was running. So the app sat without its engine,
+    /// saying so, and the installer never saw it quit. The sheet goes, the
+    /// check is skipped (Install is only offered when none of his work is
+    /// running), and if the app has still not ended a few seconds later it
+    /// ends itself, stopping the engine as `applicationWillTerminate` would.
+    private func quitForUpdate() {
+        quitConfirmed = true
+        model.updates.sheetShown = false
+        for w in NSApp.windows {
+            if let sheet = w.attachedSheet { w.endSheet(sheet) }
+        }
+        if NSApp.modalWindow != nil { NSApp.abortModal() }
+        Task { @MainActor in NSApp.terminate(nil) }
+        // Off the main thread, so a main thread that is stuck cannot hold it.
+        let engine = model.engine
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 5) {
+            engine?.terminateNow()
+            exit(0)
         }
     }
 
@@ -67,6 +92,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Two support folders, and the one in use has no work in it: said
         // once, after the first window.
         FirstLaunch.afterLaunch()
+        Self.registerRollOpener()
+    }
+
+    /// What a double-click on a .roll runs is a helper inside this bundle
+    /// (Contents/Helpers/Open Packed Burst.app), and macOS does not always
+    /// register an app nested in another by itself. Registering it again is
+    /// harmless; without it a .roll opens with nothing.
+    private static func registerRollOpener() {
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/Open Packed Burst.app")
+        guard FileManager.default.fileExists(atPath: helper.path) else { return }
+        DispatchQueue.global(qos: .utility).async { _ = LSRegisterURL(helper as CFURL, true) }
     }
 
     /// Every crew's pages, in one place and in this order.

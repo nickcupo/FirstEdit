@@ -7,7 +7,7 @@ archive.py - a shoot's RAWs, kept in iCloud Drive.
     ./pl archive push <shoot> [--as raw|packed] [--apply]
                                             copy the originals up and verify them, the night of the
                                             shoot or any time after, as ARWs or packed bursts
-                                            (burstpack.py, about half the size). Deletes nothing.
+                                            (burstpack.py, smaller, lossless). Deletes nothing.
     ./pl archive drop <shoot> [--apply]     remove local originals that are provably in iCloud, once
                                             the shoot is finished
     ./pl archive pull <shoot> [--apply]     bring them back down
@@ -419,7 +419,7 @@ def dest_for(shoot: Path, name: str) -> Path:
 #
 # A burst packed on the Finish page (burstpack.py) is a second form a frame's
 # copy in iCloud can take: packed/<burst>.roll in the shoot's archive folder,
-# holding every frame of the burst losslessly, at about half the size. push
+# holding every frame of the burst losslessly, in less space. push
 # sends it instead of the burst's ARWs; drop and pull accept it as the copy.
 #
 # The record is archive.json's "packed": for each file its bytes and SHA-256,
@@ -534,8 +534,9 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
     so a line typed from habit is not an error, and means nothing now.
 
     `form` is what goes up: "raw", the ARWs as they are, or "packed", each
-    burst packed first (burstpack.py) and sent as one file of about half the
-    size. A frame already up in either form is not sent again."""
+    burst packed first (burstpack.py) and sent as one smaller file (57-88% of
+    its RAWs on real a6500 shoots, by the light). A frame already up in either
+    form is not sent again."""
     shoot = Path(shoot).expanduser().resolve()
     bad = icloud_ready()
     if bad:
@@ -592,7 +593,7 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
     print(f"  {shoot.name}: {len(frames)} originals, {already} already up")
     print(f"  would copy {len(todo)} frames, {human(total)}, to {dest_for(shoot, '').parent}")
     if todo and form == "packed":
-        print("  packed first, each burst into one file of about half its size (burstpack), and each")
+        print("  packed first, each burst into one smaller file (burstpack), and each")
         print("  file unpacked and checked against its RAWs before it is copied")
     if not todo:
         print("  nothing to do.")
@@ -660,6 +661,7 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
                 print(f"    {q.name}: copied wrong, left alone")
                 failed += len(inside)
                 continue
+            _burstpack().give_icon(tmp)      # a copy does not carry the icon; iCloud keeps it on eviction
             os.replace(tmp, d)
             man["packed"][q.name] = {
                 "bytes": q.stat().st_size, "sha256": want,
@@ -1463,48 +1465,71 @@ def repack(shoot: Path, apply: bool) -> int:
     bp = _burstpack()
     manifest_path(shoot).parent.mkdir(parents=True, exist_ok=True)
     stage = shoot / PACKED / ".staging"
+    # What a stopped run left here is only ever its own unfinished output.
+    for t in (stage.iterdir() if stage.is_dir() else []):
+        t.unlink(missing_ok=True)
     groups = bp.group_names(shoot, set(todo))
     steps, step = len(todo) + len(covered), 0
     packed_n = failed = 0
-    for gid, names, key in groups:
-        progress("repack", step, steps)
-        step += len(names)
-        srcs, why = [], ""
-        for n in names:
-            p, d = raw / n, dest_for(shoot, n)
-            if local(p) and _same_bytes(p, man[n]):
-                srcs.append(p)
+    progress("repack", 0, steps)
+    # The packing itself is what takes the time (a minute a burst on one
+    # core), so bursts are packed side by side, as pack_shoot does. Everything
+    # that touches iCloud or the manifest stays here, one burst at a time:
+    # fetching and checking a burst's ARWs as it is handed to a worker, and,
+    # as each comes back, the copy up, the read back and the record.
+    inflight: dict[str, tuple[list[str], str, Path]] = {}   # gid -> names, file, staged output
+
+    def jobs():
+        nonlocal step, failed
+        for gid, names, key in groups:
+            srcs, why = [], ""
+            for n in names:
+                p, d = raw / n, dest_for(shoot, n)
+                if local(p) and _same_bytes(p, man[n]):
+                    srcs.append(p)
+                    continue
+                if not local(d) and not materialise(d):
+                    why = f"iCloud did not hand {n} over"
+                    break
+                if not _same_bytes(d, man[n]):
+                    why = f"the ARW of {n} in iCloud does not match what was pushed"
+                    break
+                srcs.append(d)
+            if why:
+                failed += len(names)
+                step += len(names)
+                progress("repack", step, steps)
+                print(f"    {gid}: not packed: {why}", flush=True)
                 continue
-            if not local(d) and not materialise(d):
-                why = f"iCloud did not hand {n} over"
-                break
-            if not _same_bytes(d, man[n]):
-                why = f"the ARW of {n} in iCloud does not match what was pushed"
-                break
-            srcs.append(d)
-        if why:
-            failed += len(names)
-            print(f"    {gid}: not packed: {why}")
-            continue
-        file = f"{gid}{bp.EXT}"
-        i = 2
-        while file in packs or packed_dest(shoot, file).exists():
-            file, i = f"{gid}-{i}{bp.EXT}", i + 1
-        stage.mkdir(parents=True, exist_ok=True)
-        out = stage / file
-        out.unlink(missing_ok=True)
+            file = f"{gid}{bp.EXT}"
+            i = 2
+            taken = {f for _, f, _ in inflight.values()}
+            while file in packs or file in taken or packed_dest(shoot, file).exists():
+                file, i = f"{gid}-{i}{bp.EXT}", i + 1
+            stage.mkdir(parents=True, exist_ok=True)
+            out = stage / file
+            out.unlink(missing_ok=True)
+            inflight[gid] = (names, file, out)
+            yield gid, srcs, key, out           # packed and proved by unpacking before it is written
+
+    def finish(gid: str, _before: int, _after: int, err: str | None) -> None:
+        nonlocal step, failed, packed_n
+        names, file, out = inflight[gid]
+        step += len(names)
         q = packed_dest(shoot, file)
         tmp = q.parent / f".{file}.part"
         try:
-            bp.pack(srcs, out, key, log=lambda *_: None)      # proved by unpacking before it is written
+            if err is not None:
+                raise ValueError(err)
             want = sha256(out)
             q.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(out, tmp)
             if sha256(tmp) != want:
                 tmp.unlink(missing_ok=True)
                 failed += len(names)
-                print(f"    {file}: copied wrong, left alone")
-                continue
+                print(f"    {file}: copied wrong, left alone", flush=True)
+                return
+            bp.give_icon(tmp)                # a copy does not carry the icon; iCloud keeps it on eviction
             os.replace(tmp, q)
             packs[file] = {"bytes": out.stat().st_size, "sha256": want,
                            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1513,17 +1538,38 @@ def repack(shoot: Path, apply: bool) -> int:
             write_json_atomic(manifest_path(shoot), whole)
             packed_n += len(names)
             print(f"    {file}: {len(names)} frames, {human(q.stat().st_size)} in place of "
-                  f"{human(sum(man[n].get('bytes', 0) for n in names))}")
+                  f"{human(sum(man[n].get('bytes', 0) for n in names))}", flush=True)
         except (OSError, ValueError) as e:
             tmp.unlink(missing_ok=True)
             failed += len(names)
-            print(f"    {gid}: {e}")
+            print(f"    {gid}: {e}", flush=True)
         except BaseException:
             tmp.unlink(missing_ok=True)
-            write_json_atomic(manifest_path(shoot), whole)
             raise
         finally:
             out.unlink(missing_ok=True)
+            inflight.pop(gid, None)
+            progress("repack", step, steps)
+
+    biggest = max((man[n].get("bytes", 0) for _, names, _ in groups for n in names), default=0)
+    workers = bp._workers(len(groups), biggest) if groups else 1
+    if len(groups) > 1:
+        print(f"  packing on {workers} {'core' if workers == 1 else 'cores'}", flush=True)
+    try:
+        if workers == 1:
+            for job in jobs():
+                finish(*bp._pack_one(job, lambda *_: None))
+        else:
+            bp._pack_parallel(jobs(), workers, lambda _line: None, finish)
+    except BaseException:
+        # Stopped from the studio (SIGTERM arrives as SystemExit): the pool is
+        # ended by then; what was copied up and recorded stays recorded, and
+        # the half-copied .part files, inside iCloud Drive, are not left.
+        for _, file, out in inflight.values():
+            (packed_dest(shoot, file).parent / f".{file}.part").unlink(missing_ok=True)
+            out.unlink(missing_ok=True)
+        write_json_atomic(manifest_path(shoot), whole)
+        raise
     try:
         stage.rmdir()
     except OSError:

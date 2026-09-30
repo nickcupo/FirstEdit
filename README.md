@@ -41,6 +41,9 @@ the edit there.
   your finished exports.
 - **Everything is explained.** Each frame's note says what was decided and why.
   Nothing is written that PhotoLab can't open.
+- **Packed RAW backups.** Backing up to iCloud packs each burst into one
+  lossless `.roll` file, 57–88% of the size of its RAWs on real a6500 shoots
+  (79% overall), and every byte comes back on the way down.
 
 Noise reduction stays in PhotoLab (DeepPRIME). FirstEdit never renders your
 photos itself.
@@ -78,6 +81,65 @@ finish the edit.
 | **4. Presets** | A sidecar is written beside each keeper's RAW. |
 | **5. Edit in PhotoLab** | Your keepers open in one folder, with their sidecars. |
 | **6. Instagram & Finish** | Crops for Instagram. What you exported is recorded so the next shoot learns from it. |
+
+## Packed RAW backups
+
+**Finish ▸ Back Up to iCloud…** sends a shoot's RAWs up *packed* by default.
+Choose *RAW files* on the same sheet to send the ARWs as they are.
+
+**How it saves space.** A burst is many near-identical frames. Each burst
+becomes one file, `packed/burst-<n>.roll`, holding every frame of that burst,
+not just one of them. The frame you kept is stored on its own, compressed.
+Each of the others is stored as its difference from the frame next to it,
+after allowing for the camera moving a few pixels between shots. A frame that
+isn't in any burst gets a file of its own (`frame-<name>.roll`), compressed
+the same way. The codec understands Sony's compressed-ARW sensor blocks
+(a6500 "Compressed" RAW), and coding those more tightly is where nearly all
+of the saving comes from. On real a6500 bursts the frame-to-frame
+differences add little: a frame stored from its neighbour packs to about the
+size of one stored alone (73% against 75% outdoors, 88% both indoors), since
+what is left once the picture is predicted is sensor noise, which differs in
+every frame. So a long burst saves no more per frame than a short one.
+
+**It's lossless.** Unpacking gives back the original ARW, byte for byte, with
+its modified time. Each file is unpacked and checked against its RAWs'
+checksums before it is copied up, and read back after. A frame that doesn't
+come back exactly is sent as its ARW instead.
+
+**What it saves.** Measured on three real a6500 shoots, every burst packed
+and checked (an a6500 compressed ARW is about 24 MB):
+
+| Shoot | Frames | RAWs | Packed | Saved |
+|---|---|---|---|---|
+| A short shoot | 29 | 0.68 GB | 0.39 GB (57%) | 0.29 GB |
+| Outdoors, overcast | 850 | 19.8 GB | 14.5 GB (73%) | 5.3 GB |
+| Indoors, a dim gym | 649 | 15.1 GB | 13.3 GB (88%) | 1.8 GB |
+| All three | 1,528 | 35.6 GB | 28.1 GB (79%) | 7.4 GB |
+
+How much a shoot saves depends on its light. Sensor noise can't be
+predicted, so frames shot in good light at low ISO pack small, and dim,
+high-ISO frames, which are mostly noise, barely pack at all. On the bursts
+the codec was first measured on (Google's HDR+ set, bright hand-held
+bursts) the packed files came to 40–66% of their RAWs, where `xz -9`
+managed 74%. `./pl burstpack bench <shoot>` measures a shoot of yours
+without writing anything.
+
+**Getting them back.** You never have to unpack by hand. Culling again,
+writing the presets or building the PhotoLab folder first brings back any RAW
+that is only in iCloud, from its ARW or its `.roll`. The viewer shows packed
+frames as it shows RAWs, unpacking a burst when one of its frames is opened.
+**Bring Back from iCloud…** puts every RAW of a shoot back on the Mac.
+**In Finder**, each `.roll` shows the frame you kept as its icon, the space
+bar shows it large, and a double-click opens it in Preview (the kept frame's
+RAW, unpacked and checked) without opening FirstEdit. A `.roll` that is only
+in iCloud still shows its picture, which it carries with it, and nothing is
+downloaded to show it. Packed bursts from before v0.1.9 get their picture
+with `./pl rollicon <folder>`.
+**Free Up Space ▸ Pack in iCloud** packs RAWs that are already up there as
+ARWs, several bursts at once, then removes each ARW copy once its packed
+copy is proven.
+
+How the codec works, with the measurements: [docs/BURSTPACK.md](docs/BURSTPACK.md).
 
 ## The starting edit
 
@@ -129,6 +191,7 @@ edit/        the keepers, gathered for PhotoLab
 | [Color](docs/COLOR.md) | How exposure, tone and color are decided, with sources |
 | [ML](docs/ML.md) | What is learned, and the checks it has to pass |
 | [Design](docs/DESIGN.md) | The app, screen by screen |
+| [Burstpack](docs/BURSTPACK.md) | Packed RAW backups: the format, the codec and what it saves |
 | [Contributing](CONTRIBUTING.md) | Running the checks and building the app |
 | [Releasing](RELEASING.md) | Signing, notarizing and publishing a release |
 

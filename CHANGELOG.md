@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.1.9
+
+Back Up to iCloud chooses Packed to begin with; RAW files is still on the
+sheet.
+
+Frames that are only in a packed burst show in the viewer like any other:
+the grid, the full view and 1:1. With no RAW on this Mac and no picture of it
+cached, the burst holding the frame (in the shoot's packed/ folder, else in
+iCloud) is unpacked into a temporary folder, checked, and the previews and
+decode are made from it. One unpack does a whole burst's thumbnails. The RAW
+is not put back into the shoot; Bring Back from iCloud does that.
+
+Packed bursts show the frame you kept in Finder: as their icon, under the
+space bar, and on a double-click. The icon and the space bar are two Quick
+Look extensions (Contents/PlugIns/RollThumbnail.appex and
+RollQuickLook.appex) that read the camera's preview of the kept frame
+straight out of the file, turned upright, without unpacking a RAW. A
+double-click runs Open Packed Burst (Contents/Helpers), which hands the kept
+frame's RAW, unpacked and checked, to Preview and quits; it never opens
+FirstEdit or its windows.
+
+A packed burst that iCloud has evicted still shows it, and nothing is
+downloaded to do so. Every `.roll` is now written carrying its kept frame as
+its Finder icon and, beside it, the picture itself, in its extended
+attributes, which stay on this Mac when the file's contents do not; the
+space bar and a double-click show that picture. The file's bytes, and so its
+checksum, do not change. For packed bursts written before this version:
+`./pl rollicon <folder>` (downloaded ones only).
+
+Pack in iCloud packs bursts side by side on three quarters of the cores, as
+packing on this Mac already did, where it packed one at a time on one core:
+a shoot of a thousand frames takes minutes, not hours. Fetching and checking
+each burst's ARWs, the copy up, the read back and the record stay one at a
+time; on twelve real bursts the packed files were byte for byte the same.
+
+Back Up to iCloud's sheet no longer says Packed is about half the size. On
+real a6500 shoots packing came to 57-88% of the RAWs, 79% over 1,528 frames,
+and the light decides it: dim, high-ISO frames are mostly noise, which cannot
+be predicted. A frame coded from its neighbour packs to about the size of one
+coded alone, so a long burst saves no more per frame than a short one. The
+README and docs/BURSTPACK.md have the measurements.
+
+Install and Relaunch no longer leaves the app open without its engine. The
+update sheet stayed up over the window, and the quit asked the engine, which
+had already gone, whether a job was running; the installer waited for an app
+that never quit. The app now closes the sheet, skips that question, and ends
+itself if it has not quit within five seconds.
+
 ## v0.1.8
 
 RAW files already in iCloud can be packed where they are: Free Up Space ▸

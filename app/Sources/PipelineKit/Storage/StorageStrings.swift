@@ -44,7 +44,7 @@ extension Strings {
             s("storage.asRAW", "RAW files", "Back Up to iCloud's choice: the ARWs as they are.")
         }
         public static var asPacked: String {
-            s("storage.asPacked", "Packed, about half the size",
+            s("storage.asPacked", "Packed, smaller, every byte kept",
               "Back Up to iCloud's choice: each burst packed losslessly into one file first.")
         }
         public static var formPushNote: String {
@@ -117,7 +117,7 @@ extension Strings {
         }
         public static var freePackNote: String {
             s("storage.freePackNote",
-              "Packs the RAW files already in iCloud to about half their size, and lets each ARW copy go only once its packed copy is up and gives it back exactly. Until iCloud has uploaded a packed copy, its ARWs stay; choosing this again lets them go.",
+              "Packs the RAW files already in iCloud into smaller files (how much smaller depends on the light), and lets each ARW copy go only once its packed copy is up and gives it back exactly. Until iCloud has uploaded a packed copy, its ARWs stay; choosing this again lets them go.",
               "Under Free Up Space's choice, Pack in iCloud.")
         }
         public static var repackNothing: String {

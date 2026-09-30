@@ -1135,11 +1135,25 @@ def pack(paths: list[Path], out: Path, key: str | None = None, log=print) -> dic
             fh.write(archive)
             fh.flush()
             os.fsync(fh.fileno())
+        give_icon(Path(tmp), archive)
         os.replace(tmp, out)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
     return manifest
+
+
+def give_icon(p: Path, archive: bytes | None = None) -> None:
+    """The kept frame as the file's Finder icon (rollicon.py), which it keeps
+    when iCloud evicts it. Only a picture: a file that cannot have one is
+    written all the same."""
+    try:
+        if str(_here()) not in sys.path:
+            sys.path.insert(0, str(_here()))
+        import rollicon  # noqa: E402
+        rollicon.give_icon(p, archive)
+    except Exception:
+        pass
 
 
 def read_manifest(archive: bytes) -> tuple[dict, int]:
@@ -1446,18 +1460,41 @@ def _worker_pack(job: tuple) -> tuple[str, int, int, str | None]:
     return _pack_one(job, _LINES.put)
 
 
-def _pack_parallel(jobs: list[tuple], workers: int, tick, ended) -> None:
+def _pack_parallel(jobs, workers: int, tick, ended) -> None:
     """Bursts on separate processes. Each burst is one worker's from start to
     finish, so the frames of a burst are still packed in their order; only
     whole bursts run side by side. Every line a worker prints comes back here,
-    so the progress bar and the log are the same as a run on one core."""
+    so the progress bar and the log are the same as a run on one core.
+
+    `jobs` is read only as workers come free, with one waiting beside them:
+    archive.repack hands over a generator that fetches a burst's ARWs from
+    iCloud as it yields it, and that should run just ahead of the packing,
+    not download the whole shoot before the first burst starts."""
     import multiprocessing as mp
     import queue
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
+    todo = iter(jobs)
+
+    def lines() -> None:
+        while True:
+            try:
+                tick(q.get_nowait())
+            except queue.Empty:
+                return
+
     with ctx.Pool(workers, initializer=_worker_start, initargs=(q,)) as pool:
-        pending = [pool.apply_async(_worker_pack, (job,)) for job in jobs]
-        while pending:
+        pending: list = []
+        more = True
+        while pending or more:
+            while more and len(pending) <= workers:
+                job = next(todo, None)
+                if job is None:
+                    more = False
+                else:
+                    pending.append(pool.apply_async(_worker_pack, (job,)))
+            if not pending:
+                break
             try:
                 tick(q.get(timeout=0.25))
             except queue.Empty:
@@ -1465,20 +1502,12 @@ def _pack_parallel(jobs: list[tuple], workers: int, tick, ended) -> None:
             still = []
             for r in pending:
                 if r.ready():
-                    while True:            # its own lines first, then how it ended
-                        try:
-                            tick(q.get_nowait())
-                        except queue.Empty:
-                            break
+                    lines()                # its own lines first, then how it ended
                     ended(*r.get())
                 else:
                     still.append(r)
             pending = still
-    while True:
-        try:
-            tick(q.get_nowait())
-        except queue.Empty:
-            break
+    lines()
 
 
 def check_shoot(shoot: Path, log=print) -> int:

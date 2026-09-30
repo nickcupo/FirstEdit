@@ -698,6 +698,88 @@ def test_arw_copies_wait_for_icloud_to_have_the_packed_one(tmp_path, monkeypatch
     assert not list(up.glob("*.ARW"))
 
 
+def _in_icloud_only(tmp_path: Path, monkeypatch) -> Path:
+    import archive
+    shoot = _shoot(tmp_path)
+    (shoot / "shoot.json").write_text(json.dumps({"kind": "other", "finished": "2026-01-02"}))
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    archive.push(shoot, apply=True)                    # up as RAW files
+    archive.drop(shoot, apply=True)                    # and gone from this Mac
+    assert not list((shoot / "raw").iterdir())
+    return shoot
+
+
+def test_packing_in_icloud_runs_bursts_side_by_side_and_packs_the_same_bytes(tmp_path, monkeypatch, capsys):
+    import archive
+    got = {}
+    for workers in (1, 2):
+        shoot = _in_icloud_only(tmp_path / f"on-{workers}", monkeypatch)
+        monkeypatch.setattr(bp, "_workers", lambda n, size, w=workers: w)
+        capsys.readouterr()
+        assert archive.repack(shoot, apply=True) == 0
+        out = capsys.readouterr().out
+        assert f"packing on {workers} {'core' if workers == 1 else 'cores'}" in out
+        assert "Packed 5 frames in iCloud; removed 5 ARW copies" in out
+        up = tmp_path / f"on-{workers}" / "icloud" / shoot.name / "packed"
+        # Each frame's mtime is its copy's in iCloud, which each run pushed anew.
+        got[workers] = {p.name: (archive.unpacked_hashes(p),
+                                 [{k: v for k, v in f.items() if k != "mtime_ns"}
+                                  for f in bp.read_manifest(p.read_bytes())[0]["frames"]])
+                        for p in up.iterdir()}
+        assert not (shoot / "packed" / ".staging").exists()
+    assert sorted(got[2]) == ["burst-0.roll", "burst-1.roll"]
+    assert got[2] == got[1], "side by side, each burst packs as it does on one core"
+
+
+def test_a_burst_that_cannot_be_packed_in_icloud_does_not_stop_the_others(tmp_path, monkeypatch, capsys):
+    import archive
+    shoot = _in_icloud_only(tmp_path, monkeypatch)
+    monkeypatch.setattr(bp, "_workers", lambda n, size: 2)
+    bad = archive.dest_for(shoot, "TSC01003.ARW")
+    bad.write_bytes(bad.read_bytes()[:-1] + b"\0")
+    capsys.readouterr()
+    assert archive.repack(shoot, apply=True) == 1
+    out = capsys.readouterr().out
+    assert "burst-1: not packed: the ARW of TSC01003.ARW in iCloud does not match what was pushed" in out
+    up = tmp_path / "icloud" / shoot.name
+    assert sorted(p.name for p in (up / "packed").iterdir()) == ["burst-0.roll"]
+    assert sorted(p.name for p in up.glob("*.ARW")) == ["TSC01003.ARW", "TSC01004.ARW"], \
+        "the burst left out keeps its ARWs; the packed one's go"
+    assert not list(up.rglob("*.part"))
+
+
+def test_the_pool_takes_a_burst_only_as_a_worker_comes_free(tmp_path):
+    """So repack's fetching from iCloud runs just ahead of the packing."""
+    frames = [f for s in range(5) for f in _burst(2, seed=10 + s)]
+    paths = _files(tmp_path, frames)
+    handed, ended = [], []
+
+    def jobs():
+        for i in range(5):
+            handed.append(i)
+            assert len(handed) - len(ended) <= 3, "two workers and one waiting, never more"
+            yield f"b{i}", paths[2 * i:2 * i + 2], None, tmp_path / f"b{i}{bp.EXT}"
+
+    bp._pack_parallel(jobs(), 2, lambda _line: None, lambda bid, b, a, err: ended.append((bid, err)))
+    assert sorted(ended) == [(f"b{i}", None) for i in range(5)]
+
+
+def test_every_packed_burst_written_is_given_its_icon(tmp_path, monkeypatch):
+    """Here, and each copy into iCloud, which a copy would otherwise leave without one."""
+    import archive
+    import rollicon
+    given: list[str] = []
+    monkeypatch.setattr(rollicon, "give_icon", lambda p, archive=None: given.append(Path(p).name) or True)
+    monkeypatch.setattr(bp, "_workers", lambda n, size: 1)       # in this process, where the patch is
+    shoot = _shoot(tmp_path)
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    assert archive.push(shoot, apply=True, form="packed") == 0
+    here = [n for n in given if n.startswith(".burst-") and n.endswith(".tmp")]
+    up = [n for n in given if n.endswith(".roll.part")]
+    assert len(here) == 2, "each written in packed/ on this Mac"
+    assert sorted(up) == [".burst-0.roll.part", ".burst-1.roll.part"], "and each copy up, before it takes its name"
+
+
 def test_the_sheet_reads_the_repack_list(tmp_path, monkeypatch, capsys):
     studio = pytest.importorskip("studio")
     import archive
@@ -709,3 +791,67 @@ def test_the_sheet_reads_the_repack_list(tmp_path, monkeypatch, capsys):
     plan = studio._parse_plan("repack", capsys.readouterr().out, {})
     assert plan["ready"] and plan["label"].startswith("Pack 5 frames in iCloud (")
     assert studio._stor_argv(studio.Shoot(shoot), "repack", {}, apply=True)[-3:] == ["repack", str(shoot), "--apply"]
+
+
+def _fake_imaging(monkeypatch) -> list[Path]:
+    """cull's exiftool and faces' rawpy, stood in for: each writes a JPEG
+    named for the frame holding the SHA-256 of the RAW it was handed, so the
+    test sees which bytes the viewer made its pictures from."""
+    import hashlib
+    import types
+    import common
+    made: list[Path] = []
+
+    def extract_previews(files, outdir, meta=None):
+        for f in files:
+            (outdir / f"{f.stem}.jpg").write_text(hashlib.sha256(f.read_bytes()).hexdigest())
+            made.append(f)
+
+    def decode_to_file(raw, out, full=True):
+        out.write_text(hashlib.sha256(raw.read_bytes()).hexdigest())
+        return out
+
+    def ensure_thumbs(previews, thumbs, files, decoded=None, large=None):
+        for f in files:
+            for d in (thumbs, large):
+                d.mkdir(parents=True, exist_ok=True)
+                (d / f"{f['stem']}.jpg").write_bytes((previews / f"{f['stem']}.jpg").read_bytes())
+
+    monkeypatch.setitem(sys.modules, "cull", types.SimpleNamespace(
+        extract_previews=extract_previews, read_metadata=lambda files: {}))
+    monkeypatch.setitem(sys.modules, "faces", types.SimpleNamespace(decode_to_file=decode_to_file))
+    monkeypatch.setattr(common, "ensure_thumbs", ensure_thumbs)
+    return made
+
+
+@pytest.mark.parametrize("where", ["here", "icloud"])
+def test_a_frame_only_in_a_packed_burst_still_has_its_pictures(tmp_path, monkeypatch, where):
+    import hashlib
+    import shutil
+    import archive
+    studio = pytest.importorskip("studio")
+    shoot, raws = _finished_shoot(tmp_path, monkeypatch)
+    if where == "icloud":
+        assert archive.push(shoot, apply=True, form="packed") == 0
+        shutil.rmtree(shoot / "packed")
+    shutil.rmtree(shoot / "raw")                      # the RAWs let go, and the cache taken back
+    made = _fake_imaging(monkeypatch)
+    s = studio.Shoot(shoot)
+    sha = {Path(n).stem: hashlib.sha256(b).hexdigest() for n, b in raws.items()}
+    first = sorted(sha)[0]
+
+    assert studio.Handler._raw(s, first) is None
+    assert studio.Handler._previews_from_packed(s, first)
+    burst = {p.stem for p in made}
+    assert first in burst and len(burst) == 3, "the whole burst in one unpack, and only that burst"
+    for stem in burst:
+        for sub in ("previews", "thumbs", "large"):
+            assert (shoot / "cull" / sub / f"{stem}.jpg").read_text() == sha[stem]
+    assert (shoot / "cull" / "previews" / "CACHEDIR.TAG").exists(), "made here, so reclaimable again"
+    n = len(made)
+    assert studio.Handler._previews_from_packed(s, sorted(burst)[1]) and len(made) == n
+
+    decoded = studio.Handler._decoded(s, first)
+    assert decoded is not None and decoded.read_text() == sha[first]
+    assert not (shoot / "raw").exists(), "the RAW is not put back into the shoot"
+    assert studio.Handler._decoded(s, "TSC09999") is None

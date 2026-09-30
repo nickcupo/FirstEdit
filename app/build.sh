@@ -52,6 +52,18 @@ APP="build/FirstEdit.app"
 C="$APP/Contents"
 R="$C/Resources"
 EXE="$C/MacOS/FirstEdit"
+# Packed bursts (.roll) in Finder: two Quick Look extensions, each built from
+# app/Sources/<name>, each with app/Resources/<name>-Info.plist, and signed on
+# its own with the extensions' entitlements (a Quick Look extension must be
+# sandboxed; the app is not). name:the class its Info.plist names.
+#   RollThumbnail   the thumbnail, in icon view and everywhere else
+#   RollQuickLook   the preview, under the space bar
+QL_EXTS=(RollThumbnail:RollThumbnailProvider RollQuickLook:RollPreviewProvider)
+QLX_ENTITLEMENTS=app/Resources/RollThumbnail.entitlements
+qlx() { print -r -- "$C/PlugIns/$1.appex"; }
+# And what a double-click on a .roll runs: a helper app of its own, built from
+# app/Sources/RollOpen, so that opening a packed burst never opens FirstEdit.
+OPENER="$C/Helpers/Open Packed Burst.app"
 MARKER="build/gate.json"
 BPY=build/python/bin/python3
 # Everything the bundle is described by lives beside the strings and the icon
@@ -69,10 +81,18 @@ ICON=build/AppIcon.icon
 MACOS_MIN="$(sed -n 's|.*<key>LSMinimumSystemVersion</key><string>\([0-9.]*\)</string>.*|\1|p' "$PLIST")"
 MACOS_MIN="${MACOS_MIN:-15.0}"
 IDENTITY="${IDENTITY:-}"
-SIGN=(codesign --force --options runtime --entitlements "$ENTITLEMENTS")
-if [ -n "$IDENTITY" ]; then SIGN+=(--timestamp --sign "$IDENTITY"); else SIGN+=(--sign -); fi
+if [ -n "$IDENTITY" ]; then WHO=(--timestamp --sign "$IDENTITY"); else WHO=(--sign -); fi
+SIGN=(codesign --force --options runtime --entitlements "$ENTITLEMENTS" "${WHO[@]}")
 # Apple's timestamp service drops out now and then; a signature made without it is rejected by notarization, so retry.
 sign() { local n out; for n in 1 2 3 4 5; do if out=$("${SIGN[@]}" "$@" 2>&1); then return 0; fi; echo "$out" | grep -v "replacing existing signature" || true; echo "  codesign failed (try $n), waiting"; sleep 20; done; return 1; }
+# The same, with the extension's entitlements in place of the app's.
+sign_qlx() {
+  local -a app_sign=("${SIGN[@]}")
+  SIGN=(codesign --force --options runtime --entitlements "$QLX_ENTITLEMENTS" "${WHO[@]}")
+  sign "$@"; local ok=$?
+  SIGN=("${app_sign[@]}")
+  return $ok
+}
 
 # A public build is the default, and the other kind has to be asked for by
 # its exact name. The flag used to run the other way (PUBLIC_BUILD=1 left the
@@ -303,6 +323,43 @@ gate_app() {
     printf '    %s\n' "${debris[@]:0:5}"
     bad=1
   fi
+  # The Quick Look extensions: there, arm64, for the same macOS, starting in
+  # NSExtensionMain with no main of their own (NSExtensionMain calls a main
+  # back, and the extension went round until its stack ran out), and naming
+  # the class their binary carries.
+  local ext name cls x syms
+  for ext in $QL_EXTS; do
+    name=${ext%%:*} cls=${ext#*:}
+    x="$(qlx $name)/Contents/MacOS/$name"
+    if [ ! -x "$x" ]; then
+      echo "  refusing: there is no Quick Look extension at $x"
+      bad=1
+      continue
+    fi
+    file -b "$x" | grep -q 'Mach-O.*arm64' || { echo "  refusing: $x is not an arm64 Mach-O"; bad=1; }
+    minos=$(xcrun vtool -show-build "$x" 2>/dev/null | awk '/minos/ {print $2; exit}')
+    [ "$minos" = "$MACOS_MIN" ] || { echo "  refusing: $name is built for macOS ${minos:-?}, not $MACOS_MIN"; bad=1; }
+    # (into a variable first: grep -q closing the pipe would fail nm under pipefail)
+    syms=$(nm "$x" 2>/dev/null || true)
+    echo "$syms" | grep -q "_OBJC_CLASS_\$_$cls" \
+      || { echo "  refusing: $name's binary has no $cls class"; bad=1; }
+    echo "$syms" | grep -qE ' T _main$' && { echo "  refusing: $name has a main of its own"; bad=1; }
+    echo "$syms" | grep -q ' U _NSExtensionMain$' || { echo "  refusing: $name does not start in NSExtensionMain"; bad=1; }
+  done
+  # The .roll opener: there, arm64, for the same macOS, and the one that says
+  # it opens .roll (the app itself must not: that opened FirstEdit's windows).
+  if [ ! -x "$OPENER/Contents/MacOS/RollOpen" ]; then
+    echo "  refusing: there is no .roll opener at $OPENER"
+    bad=1
+  else
+    file -b "$OPENER/Contents/MacOS/RollOpen" | grep -q 'Mach-O.*arm64' || { echo "  refusing: the .roll opener is not arm64"; bad=1; }
+    minos=$(xcrun vtool -show-build "$OPENER/Contents/MacOS/RollOpen" 2>/dev/null | awk '/minos/ {print $2; exit}')
+    [ "$minos" = "$MACOS_MIN" ] || { echo "  refusing: the .roll opener is built for macOS ${minos:-?}, not $MACOS_MIN"; bad=1; }
+    /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:LSItemContentTypes:0' "$OPENER/Contents/Info.plist" 2>/dev/null \
+      | grep -qx com.nickcupo.firstedit.roll || { echo "  refusing: the .roll opener does not open .roll"; bad=1; }
+  fi
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes' "$C/Info.plist" >/dev/null 2>&1 \
+    && { echo "  refusing: the app says it opens documents; a .roll would open its windows"; bad=1; }
   return $bad
 }
 
@@ -574,6 +631,21 @@ cp "$SWIFTBIN/FirstEdit" "$EXE"
 # at, which on his machine are under his home folder.
 strip -S -x "$EXE" 2>/dev/null || true
 [ -x "$EXE" ] || { echo "the app's binary did not reach the bundle"; exit 1; }
+for ext in $QL_EXTS; do
+  name=${ext%%:*}
+  [ -x "$SWIFTBIN/$name" ] || { echo "swift build produced no $name in $SWIFTBIN"; exit 1; }
+  mkdir -p "$(qlx $name)/Contents/MacOS"
+  sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NO/" "app/Resources/$name-Info.plist" \
+    > "$(qlx $name)/Contents/Info.plist"
+  cp "$SWIFTBIN/$name" "$(qlx $name)/Contents/MacOS/$name"
+  # -x would take the class name the extension is found by with it; -S only.
+  strip -S "$(qlx $name)/Contents/MacOS/$name" 2>/dev/null || true
+done
+[ -x "$SWIFTBIN/RollOpen" ] || { echo "swift build produced no RollOpen in $SWIFTBIN"; exit 1; }
+mkdir -p "$OPENER/Contents/MacOS"
+sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NO/" app/Resources/RollOpen-Info.plist > "$OPENER/Contents/Info.plist"
+cp "$SWIFTBIN/RollOpen" "$OPENER/Contents/MacOS/RollOpen"
+strip -S -x "$OPENER/Contents/MacOS/RollOpen" 2>/dev/null || true
 fi
 
 if [ "${STAGE:-}" != "dmg" ]; then
@@ -603,6 +675,10 @@ xattr -cr "$APP"
 files=("${(@f)$("$BPY" app/macho.py "$R")}")
 for ((i = 1; i <= ${#files}; i += 40)); do sign "${files[@]:$((i-1)):40}"; done
 echo "  ${#files} files signed"
+# Inside out: the extensions are sealed into the app's signature, so they are
+# signed first, with their own entitlements.
+for ext in $QL_EXTS; do sign_qlx "$(qlx ${ext%%:*})" || exit 1; done
+sign "$OPENER" || exit 1
 sign "$APP"
 codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | tail -1
 if [ -n "$IDENTITY" ]; then

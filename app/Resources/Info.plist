@@ -31,6 +31,17 @@
   <!-- Neither kind of termination without asking. The app owns a Python child
        and a queue of verdicts that have not been written yet; macOS killing it
        quietly, or keeping it "running" while it is not, loses both. -->
+  <!-- A packed burst (pipeline/burstpack.py). Declared here so Finder knows
+       .roll is this app's, which is what lets the Quick Look extension in
+       Contents/PlugIns (RollThumbnail) draw its thumbnails: the kept frame. -->
+  <key>UTExportedTypeDeclarations</key><array><dict>
+    <key>UTTypeIdentifier</key><string>com.nickcupo.firstedit.roll</string>
+    <key>UTTypeDescription</key><string>FirstEdit Packed Burst</string>
+    <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.content</string></array>
+    <key>UTTypeTagSpecification</key><dict>
+      <key>public.filename-extension</key><array><string>roll</string></array>
+    </dict>
+  </dict></array>
   <key>NSSupportsAutomaticTermination</key><false/>
   <key>NSSupportsSuddenTermination</key><false/>
 </dict></plist>
