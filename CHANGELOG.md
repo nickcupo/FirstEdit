@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.1.10
+
+FirstEdit no longer freezes while a long job runs. The toolbar's progress
+line chose its own length from the room the toolbar gave it, the toolbar
+sized itself from that line, and with a long title and a time left that
+changed on every update the two went round each other until the window
+stopped answering; Pack in iCloud on a large shoot did it every time. The
+line now goes on to the time left from a window of 1280 pt.
+
+Stop ends a pack on several cores at once. It left the pack running for
+ever: a worker stopped while waiting for its next burst held a lock the
+others' shutdown waited on. Each burst is now packed by a process of its
+own, which ends when it is stopped, whatever it was doing.
+
+Pack in iCloud downloads six bursts from iCloud at once rather than one, and
+records each burst as it finishes, so its bar moves from the first burst
+packed instead of sitting at Starting. Started again after a stop, it picks
+up where it was and its bar says so: the shoot's frames packed, counting
+those an earlier run packed, then letting the ARW copies go as a stage of
+its own. The time left is this run's.
+
+A copy into iCloud cut short by a force-quit or the Mac going off is no
+longer left in iCloud Drive to be uploaded: the next Back Up or Pack in
+iCloud of the shoot clears it, and FirstEdit clears what an interrupted pack
+left in any shoot when it starts. The storage panel follows a pack running
+on its shoot even when the job number it was told is not the one running.
+
 ## v0.1.9
 
 Back Up to iCloud chooses Packed to begin with; RAW files is still on the
