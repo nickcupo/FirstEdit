@@ -171,7 +171,8 @@ public struct RootView: View {
                                     showTheList: Queues.showTheList,
                                     letGo: { Task { await Queues.model(client: app.client).hold(false) } },
                                     dismiss: { app.dismissEnded() },
-                                    compact: Self.statusItemIsShort(step: nav.step, windowWidth: width))
+                                    compact: Self.statusItemIsShort(step: nav.step, windowWidth: width),
+                                    timeLeft: Self.statusItemSaysTimeLeft(windowWidth: width))
             }
         }
         if nav.hasInspector {
@@ -202,6 +203,13 @@ public struct RootView: View {
     /// fits beside the title.
     static func statusItemIsShort(step: String?, windowWidth: CGFloat) -> Bool {
         step == "keepers" && windowWidth < Tokens.Metric.statusItemWholeFrom
+    }
+
+    /// Whether the status item's line goes on to the time left, from the
+    /// window's width as AppKit tells it: not from the item's own size,
+    /// which is what made it a cycle (`ActivityToolbarItem.timeLeft`).
+    static func statusItemSaysTimeLeft(windowWidth: CGFloat) -> Bool {
+        windowWidth >= Tokens.Metric.statusItemTimeLeftFrom
     }
 
     /// What the `.status` item is about: the running job; else a job that

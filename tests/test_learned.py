@@ -728,6 +728,10 @@ def test_what_is_left_is_a_rounded_guess_or_nothing_at_all(tmp_path):
     assert studio.how_much_longer(True, 0.01, 60) is None      # too little of it done
     assert studio.how_much_longer(False, 0.5, 60) is None      # not running
     assert studio.how_much_longer(True, 0.5, 60) == 60
+    # Picked up where an earlier run stopped: the bar opened at 60% two
+    # seconds in, and from nought that read as 60% done in two seconds.
+    assert studio.how_much_longer(True, 0.62, 3, since=(0.6, 2)) is None   # this run has barely begun
+    assert studio.how_much_longer(True, 0.7, 62, since=(0.6, 2)) == 180    # 10% in a minute, 30% to go
     assert studio.about_how_long(None) == ""
     assert studio.about_how_long(20) == "less than a minute left"
     assert studio.about_how_long(60) == "about 1 minute left"

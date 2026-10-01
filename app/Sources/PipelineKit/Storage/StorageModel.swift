@@ -348,6 +348,16 @@ public final class StorageModel {
                 return
             }
             guard followingID == id else { return }
+            if j.id != id, j.running, j.shoot == shoot, j.kind.hasPrefix("stor-") {
+                // A storage job on this shoot is running and it is not the
+                // number this was told. The row followed only that number, so
+                // a pack that was running and reporting sat under "Starting…"
+                // for as long as it ran. What is running on this shoot's
+                // storage is what the row is for: it follows that.
+                following = j
+                followingID = j.id
+                return
+            }
             if j.id == id || (id == 0 && j.shoot == shoot && j.kind.hasPrefix("stor-")) {
                 if j.running {
                     following = j
@@ -425,6 +435,7 @@ public final class StorageModel {
     /// For the tests: the id of a request already in the engine's line, so
     /// taking it back out can be exercised without racing the queue.
     func setWaitingForTest(_ id: Int) { waitingID = id }
+    func setFollowingForTest(_ id: Int) { startFollowing(id) }
 
     /// Stop the job in the way, with what it is and where it has got to in
     /// front of him. His decision, on his own work; the panel never makes it.

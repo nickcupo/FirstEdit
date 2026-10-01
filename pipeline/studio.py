@@ -290,6 +290,7 @@ STAGE_WORDS = {
     "trim": ("removing copies from iCloud", "files"),
     "unpack": ("unpacking", "frames"),
     "repack": ("packing the RAWs in iCloud", "frames"),
+    "letgo": ("letting go of the ARW copies in iCloud", "copies"),
 }
 INGEST_WEIGHTS = {"copy": 70, "verify": 30}
 # By what was asked of the copy. Without a check there is no second stage, so
@@ -315,6 +316,10 @@ UPDATE_WEIGHTS = {"download": 90, "stage": 10}
 # One stage each: a push is a push. Held as a dict per verb so the bar's
 # arithmetic below is the same for these as it is for a cull.
 STOR_WEIGHTS = {k: {k: 100} for k in ("push", "drop", "pull", "expire", "check", "reclaim", "pack", "checkpacked", "trim", "unpack", "repack")}
+# Pack in iCloud is two stages: the packing, counted over every frame of the
+# shoot so a run started again opens where the last stopped, then letting the
+# ARW copies go, which only reads and removes.
+STOR_WEIGHTS["repack"] = {"repack": 80, "letgo": 20}
 # By kind, for the jobs that are one stage long and are not storage verbs. An
 # Instagram make was weighed against the cull's table, where "instagram" is
 # not a stage, and its bar sat at 0% until it ended. The planning pass is added
@@ -2403,6 +2408,11 @@ class Jobs:
         # seeing it end, if there was one; and the history, trimmed.
         self._cut_off()
         self._prune_history()
+        # And what an interrupted pack left behind, in any shoot: only once no
+        # job of ours can still be writing - its note gone because it was put
+        # down or ended - and never while another engine's job runs.
+        if not self.running_store().exists():
+            threading.Thread(target=_clear_strays, daemon=True).start()
         with self.lock:
             if self.queue:
                 self.asked = len(self.queue)
@@ -3081,7 +3091,8 @@ class Jobs:
         running = bool(proc and proc.poll() is None)
         txt = log.read_text(errors="replace") if log and log.exists() else ""
         lines = [l for l in txt.replace("\r", "\n").splitlines() if l.strip() and "WARN:" not in l and "HF_TOKEN" not in l]
-        marks = [l for l in lines if l.startswith("@@ ") and not l.startswith(ENDED_MARK)]
+        start_mark = next((l for l in lines if l.startswith(FROM_MARK)), None)
+        marks = [l for l in lines if l.startswith("@@ ") and not l.startswith((ENDED_MARK, FROM_MARK))]
         # A storage job is kind "stor-push" or "plan-drop": the verb after the
         # dash is its one stage. See STAGE_WORDS for why its count is read out
         # of the script's ordinary output rather than from a `@@` line.
@@ -3144,6 +3155,20 @@ class Jobs:
                     if self.started == started and not self.took:
                         self.took = took
             elapsed = took
+        # Where the bar stood when this run began, if the job said so: a job
+        # that picks up where an earlier run stopped (`@@ from <stage> n of`)
+        # opens part of the way along, and the time left is this run's own.
+        since = (0.0, 0)
+        if start_mark:
+            try:
+                _, _, st, d, t = start_mark.split()
+                before = order[:order.index(st)] if st in order else []
+                f0 = (sum(weights.get(k, 0) for k in before)
+                      + weights.get(st, 0) * min(1.0, int(d) / max(1, int(t)))) / max(1, total)
+                since = (f0, 0)
+            except ValueError:
+                pass
+        left = how_much_longer(running, frac, elapsed, since)
         # Whether this job came off the list: said on every reading of it,
         # the last ones included. It used to go False the moment the job was
         # written into `done`, so every reading after the end of the list's
@@ -3185,10 +3210,10 @@ class Jobs:
                 # When it started, in seconds since the epoch: the app's
                 # history shows this, not the moment it first happened to look.
                 "started": round(started, 3) if started else None,
-                "remaining": how_much_longer(running, frac, elapsed),
+                "remaining": left,
                 # And the words for it, so no screen anywhere has to turn
                 # seconds into English twice and get two different answers.
-                "remaining_text": about_how_long(how_much_longer(running, frac, elapsed)),
+                "remaining_text": about_how_long(left),
                 # With the storage commands' terminal footers in the app's
                 # words, since the last line here is what a refused job says.
                 "log": "\n".join(w for l in lines if not l.startswith("@@ ")
@@ -3214,6 +3239,9 @@ ENGINE_WENT_AWAY = "The engine stopped while this ran."
 # sent to the group straight from the engine, it could land in the moment
 # between the parent starting and the job starting, and be lost.
 ENDED_MARK = "@@ ended "
+# "@@ from <stage> <n> <of>": where a job that picks up an earlier run's work
+# starts its bar (archive.repack). Not a stage; the time left counts from it.
+FROM_MARK = "@@ from "
 _JOB_PARENT = """
 import os, signal, subprocess, sys
 T, C = signal.SIGTERM, signal.SIGCHLD
@@ -3360,6 +3388,16 @@ def readable_log(log) -> str:
                      for w in [plan_words(l)] if w is not None)[-8000:]
 
 
+def _clear_strays() -> None:
+    """archive.clear_strays over this library, said in the engine's log."""
+    try:
+        import archive as amod
+        for t in amod.clear_strays(shoots_dir()):
+            print(f"removed {t}, left by a pack that was cut short", flush=True)
+    except Exception as e:  # noqa: BLE001 - tidying never stops the engine
+        print(f"could not tidy after interrupted packs: {e}", flush=True)
+
+
 def _put_down(pid: int, script: str, wait: float = 5.0) -> bool:
     """Stop the process group a job left behind when the engine that started
     it went away, if it is still that job. True when something was stopped.
@@ -3451,7 +3489,8 @@ def _exception_line(line: str) -> bool:
     return all(c.isalnum() or c in "_." for c in name)
 
 
-def how_much_longer(running: bool, frac: float, elapsed: int) -> int | None:
+def how_much_longer(running: bool, frac: float, elapsed: int,
+                    since: tuple[float, int] = (0.0, 0)) -> int | None:
     """Seconds left, or None when there is no honest answer yet.
 
     Straight-line off the bar, which is all anyone can say: the stages are
@@ -3463,10 +3502,19 @@ def how_much_longer(running: bool, frac: float, elapsed: int) -> int | None:
 
     It is rounded on the way out (about_how_long), because a bar that says "4
     minutes 37 seconds" is claiming a precision no estimate off a fraction has
-    ever had."""
-    if not running or frac <= 0.02 or elapsed < 8:
+    ever had.
+
+    `since` is where the bar was, and when, the first time this job said how
+    far along it was. A job that picks up where an earlier run stopped - Pack
+    in iCloud, whose bar opens at the frames already packed - starts its bar
+    part of the way along, and measured from nought it had done 60% in two
+    seconds and said "less than a minute left" from start to finish. Only
+    what this run has done counts, over the time it took to do it."""
+    f0, t0 = since
+    done, spent = frac - f0, elapsed - t0
+    if not running or done <= 0.02 or spent < 8:
         return None
-    return max(1, int(elapsed * (1 - frac) / frac))
+    return max(1, int(spent * (1 - frac) / done))
 
 
 def about_how_long(seconds: int | None) -> str:

@@ -757,7 +757,7 @@ def test_the_pool_takes_a_burst_only_as_a_worker_comes_free(tmp_path):
     def jobs():
         for i in range(5):
             handed.append(i)
-            assert len(handed) - len(ended) <= 3, "two workers and one waiting, never more"
+            assert len(handed) - len(ended) <= 2, "one burst for each of two workers, never more"
             yield f"b{i}", paths[2 * i:2 * i + 2], None, tmp_path / f"b{i}{bp.EXT}"
 
     bp._pack_parallel(jobs(), 2, lambda _line: None, lambda bid, b, a, err: ended.append((bid, err)))
@@ -778,6 +778,176 @@ def test_every_packed_burst_written_is_given_its_icon(tmp_path, monkeypatch):
     up = [n for n in given if n.endswith(".roll.part")]
     assert len(here) == 2, "each written in packed/ on this Mac"
     assert sorted(up) == [".burst-0.roll.part", ".burst-1.roll.part"], "and each copy up, before it takes its name"
+
+
+def test_bursts_are_recorded_as_they_finish_while_the_next_are_still_being_fetched(tmp_path):
+    """Fetching a burst can be a download from iCloud. With every core filled
+    before anything finished was looked at, Pack in iCloud sat at nought for
+    minutes with bursts already packed."""
+    import time
+    frames = [f for s in range(4) for f in _burst(2, seed=20 + s)]
+    paths = _files(tmp_path, frames)
+    events: list[str] = []
+
+    def jobs():
+        for i in range(4):
+            time.sleep(2)                                  # the download
+            events.append(f"handed b{i}")
+            yield f"b{i}", paths[2 * i:2 * i + 2], None, tmp_path / f"b{i}{bp.EXT}"
+
+    bp._pack_parallel(jobs(), 4, lambda _line: None, lambda bid, b, a, err: events.append(f"ended {bid}"))
+    assert sorted(e for e in events if e.startswith("ended")) == [f"ended b{i}" for i in range(4)]
+    assert events.index("handed b3") > min(events.index(e) for e in events if e.startswith("ended")), \
+        "a finished burst is recorded before the last one is even fetched"
+
+
+def test_pack_in_icloud_downloads_several_bursts_at_once(tmp_path, monkeypatch, capsys):
+    """iCloud cannot pack; each ARW comes down first. One at a time, the
+    download was the whole of the wait and most cores sat idle."""
+    import threading
+    import time
+    import archive
+    shoot = _in_icloud_only(tmp_path, monkeypatch)
+    now = [0]
+    most = [0]
+    lock = threading.Lock()
+
+    def slow_download(p, timeout=600.0, poll=0.5, stop=None):
+        with lock:
+            now[0] += 1
+            most[0] = max(most[0], now[0])
+        time.sleep(1)
+        with lock:
+            now[0] -= 1
+        return True
+
+    monkeypatch.setattr(archive, "local", lambda p: False)          # every ARW is up there only
+    monkeypatch.setattr(archive, "materialise", slow_download)
+    monkeypatch.setattr(bp, "_workers", lambda n, size: 2)
+    assert archive.repack(shoot, apply=True) == 0
+    assert most[0] == 2, "both bursts fetched at once"
+    up = tmp_path / "icloud" / shoot.name
+    assert sorted(p.name for p in (up / "packed").iterdir()) == ["burst-0.roll", "burst-1.roll"]
+    assert "Packed 5 frames in iCloud" in capsys.readouterr().out
+
+
+def test_pack_in_icloud_started_again_shows_where_it_had_got_to(tmp_path, monkeypatch, capsys):
+    """Stopped half way and started again, the bar opened at nought over a
+    shoot half packed. It counts every frame of the shoot, from those packed."""
+    import archive
+    shoot = _in_icloud_only(tmp_path, monkeypatch)
+    bad = archive.dest_for(shoot, "TSC01003.ARW")
+    good = bad.read_bytes()
+    bad.write_bytes(good[:-1] + b"\0")
+    assert archive.repack(shoot, apply=True) == 1                   # burst-0 packed, burst-1 not
+    capsys.readouterr()
+    bad.write_bytes(good)
+    assert archive.repack(shoot, apply=True) == 0
+    marks = [line for line in capsys.readouterr().out.splitlines() if line.startswith("@@ ")]
+    packing = [m for m in marks if m.startswith("@@ repack ")]
+    assert packing[0] == "@@ repack 3 5", "it opens at the three frames the first run packed"
+    assert "@@ from repack 3 5" in marks, "and says this run starts there, for its time left"
+    assert packing[-1] == "@@ repack 5 5"
+    letgo = [m for m in marks if m.startswith("@@ letgo ")]
+    assert letgo and letgo[-1] == "@@ letgo 2 2", "then burst-1's two ARW copies go, as a stage of their own"
+    assert marks.index(packing[-1]) < marks.index(letgo[0])
+
+
+_STOPPED_MIDWAY = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from common import stop_cleanly_on_sigterm
+stop_cleanly_on_sigterm()
+import burstpack as bp
+jobs = [(f"b{i}", [Path(f)], None, Path(sys.argv[2]) / f"b{i}.roll") for i, f in enumerate(sys.argv[3:])]
+print("packing", flush=True)
+bp._pack_parallel(jobs, 3, lambda _line: None, lambda *_: None)
+"""
+
+
+def test_a_stop_ends_a_pack_on_many_cores_at_once(tmp_path):
+    """The studio's Stop is SIGTERM to every process of the job. Each worker
+    here is stuck reading a pipe nobody writes to, and one core has nothing to
+    do: under multiprocessing.Pool that idle worker died holding the queue's
+    lock and the pack never ended."""
+    import os
+    import signal
+    import subprocess
+    import time
+    fifos = []
+    for i in range(2):
+        f = tmp_path / f"TSC0{i}.ARW"
+        os.mkfifo(f)
+        fifos.append(str(f))
+    p = subprocess.Popen([sys.executable, "-c", _STOPPED_MIDWAY, str(bp._here()), str(tmp_path), *fifos],
+                         stdout=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        assert p.stdout.readline().strip() == "packing"
+        time.sleep(3)                                    # the workers are up and stuck
+        os.killpg(p.pid, signal.SIGTERM)
+        p.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        pytest.fail("the pack did not end after Stop")
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    time.sleep(0.5)
+    with pytest.raises((ProcessLookupError, PermissionError)):
+        os.killpg(p.pid, 0)                              # and nothing of it is left running
+    assert not list(tmp_path.glob("*.roll"))
+
+
+def test_copies_a_run_never_finished_are_cleared_from_icloud(tmp_path, monkeypatch, capsys):
+    """A .part is a copy that never took its name: the app force-quit or the
+    Mac off mid-copy. Left in iCloud Drive it is uploaded as a file of its own."""
+    import archive
+    shoot = _in_icloud_only(tmp_path, monkeypatch)
+    up = tmp_path / "icloud" / shoot.name
+    (up / "packed").mkdir(exist_ok=True)
+    stray = [up / ".TSC01000.ARW.part", up / "packed" / ".burst-7.roll.part"]
+    for t in stray:
+        t.write_bytes(b"half a copy")
+    assert archive.repack(shoot, apply=False) == 0
+    assert all(t.exists() for t in stray), "only a run that writes clears them"
+    capsys.readouterr()
+    assert archive.repack(shoot, apply=True) == 0
+    out = capsys.readouterr().out
+    assert not any(t.exists() for t in stray)
+    assert sorted(p.name for p in (up / "packed").iterdir()) == ["burst-0.roll", "burst-1.roll"]
+    assert "removed .burst-7.roll.part, a copy an earlier run never finished" in out
+    assert "removed .TSC01000.ARW.part, a copy an earlier run never finished" in out
+
+
+def test_the_engine_clears_what_packs_cut_short_left_in_every_shoot(tmp_path, monkeypatch):
+    """A shoot nobody packs again kept its strays for good, one in iCloud
+    uploaded against his storage; the engine clears them when it starts."""
+    import archive
+    monkeypatch.setattr(archive, "ICLOUD", tmp_path / "icloud")
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud" / "Photo Pipeline Archive")
+    shoots = tmp_path / "photos" / "shoots"
+    kept = []
+    for name in ("2026-01-01-lake", "2026-01-02-gym"):
+        packed = shoots / name / "packed"
+        (packed / ".staging").mkdir(parents=True)
+        (packed / ".staging" / "burst-3.roll").write_bytes(b"half")
+        (packed / ".burst-4.roll.abc123.tmp").write_bytes(b"half")
+        (packed / "burst-1.roll").write_bytes(b"a finished pack")
+        up = archive.ARCHIVE / name
+        (up / "packed").mkdir(parents=True)
+        (up / ".TSC01000.ARW.part").write_bytes(b"half")
+        (up / "packed" / ".burst-2.roll.part").write_bytes(b"half")
+        (up / "packed" / "burst-1.roll").write_bytes(b"a finished pack")
+        (up / "TSC01001.ARW").write_bytes(b"a finished copy")
+        kept += [packed / "burst-1.roll", up / "packed" / "burst-1.roll", up / "TSC01001.ARW"]
+    gone = archive.clear_strays(shoots)
+    assert len(gone) == 2 * 5, "four files and the staging folder, in each of two shoots"
+    assert all(p.exists() for p in kept), "nothing finished is touched"
+    left = [p for p in tmp_path.rglob("*") if p.name.startswith(".")]
+    assert not left
+    assert archive.clear_strays(shoots) == [], "and a second time there is nothing"
 
 
 def test_the_sheet_reads_the_repack_list(tmp_path, monkeypatch, capsys):

@@ -69,6 +69,10 @@ public enum Tokens {
         /// line and the sidebar coming back fought over the width and never
         /// settled.
         public static let statusItemWholeFrom: CGFloat = 1440
+        /// From this window width the status item's line goes on to the
+        /// time left ("· about 9 minutes left"); narrower, the job's name
+        /// alone, and the time left is in its popover.
+        public static let statusItemTimeLeftFrom: CGFloat = 1280
 
         // §2.5.9 filmstrip.
         public static let filmstripThumb = CGSize(width: 90, height: 60)

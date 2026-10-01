@@ -78,6 +78,7 @@ import os
 import shutil
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -108,6 +109,8 @@ ICLOUD = Path(os.environ.get(
 ARCHIVE_NAME = "Photo Pipeline Archive"
 ARCHIVE = ICLOUD / ARCHIVE_NAME
 CHUNK = 1 << 20
+# How many bursts Pack in iCloud downloads from iCloud at once.
+FETCHERS = 6
 MANIFEST = "archive.json"
 
 
@@ -140,7 +143,7 @@ def local(p: Path) -> bool:
     return st.st_size == 0 or st.st_blocks > 0
 
 
-def materialise(p: Path, timeout: float = 600.0, poll: float = 0.5) -> bool:
+def materialise(p: Path, timeout: float = 600.0, poll: float = 0.5, stop=None) -> bool:
     """Ask macOS for the bytes of an evicted file and wait for them.
 
     Opening it is the request: the read blocks while FileProvider fetches it.
@@ -161,7 +164,7 @@ def materialise(p: Path, timeout: float = 600.0, poll: float = 0.5) -> bool:
         # 33 hours to print the same line 198 times.
         return False
     end = time.time() + timeout
-    while time.time() < end:
+    while time.time() < end and not (stop is not None and stop.is_set()):
         if local(p):
             return True
         time.sleep(poll)
@@ -437,6 +440,61 @@ def packed_dest(shoot: Path, file: str) -> Path:
     return ARCHIVE / Path(shoot).name / PACKED / file
 
 
+def _clear_parts(shoot: Path) -> None:
+    """A copy into iCloud lands as .<name>.part and takes its name only once
+    it has been read back. One that was never finished - the app force-quit,
+    the Mac off mid-copy, anything a Stop could not unwind - is left in iCloud
+    Drive to be uploaded as a file of its own, and nothing else ever removes
+    it. This module is the only thing that writes one, and only one job at a
+    time runs on a shoot, so any here when a job starts are strays."""
+    for d in (ARCHIVE / Path(shoot).name, ARCHIVE / Path(shoot).name / PACKED):
+        for t in (d.glob(".*.part") if d.is_dir() else []):
+            t.unlink(missing_ok=True)
+            print(f"    removed {t.name}, a copy an earlier run never finished")
+
+
+def clear_strays(shoots: Path) -> list[str]:
+    """What an interrupted pack left anywhere, cleared: the unfinished copies
+    in iCloud (_clear_parts) and, in each shoot, the half-written packs and
+    the staging folder a repack packs into. A run cleans up after itself when
+    it can, and the next run of the same job on the same shoot clears what it
+    could not; a shoot that is never packed again kept them - in iCloud Drive,
+    uploaded against his storage. Only these names, which nothing but a pack
+    writes, and nothing is opened, so nothing iCloud has evicted is fetched.
+    For the engine to run when it starts and no job of its own is running.
+    Returns what went, for its log."""
+    gone: list[str] = []
+
+    def drop(t: Path) -> None:
+        try:
+            t.unlink()
+            gone.append(str(t))
+        except OSError:
+            pass
+
+    for shoot in (sorted(d for d in shoots.iterdir() if d.is_dir()) if shoots.is_dir() else []):
+        packed = shoot / PACKED
+        if not packed.is_dir():
+            continue
+        for t in [*packed.glob(".burst-*.roll.*.tmp"), *packed.glob(".frame-*.roll.*.tmp")]:
+            drop(t)
+        stage = packed / ".staging"
+        if stage.is_dir():
+            for t in stage.iterdir():
+                drop(t)
+            try:
+                stage.rmdir()
+                gone.append(str(stage))
+            except OSError:
+                pass
+    if ICLOUD.is_dir() and ARCHIVE.is_dir():
+        for up in sorted(d for d in ARCHIVE.iterdir() if d.is_dir()):
+            for d in (up, up / PACKED):
+                for t in (d.glob(".*.part") if d.is_dir() else []):
+                    drop(t)
+    return gone
+
+
 def packed_frames(man: dict) -> dict[str, tuple[str, dict]]:
     """Every frame recorded in a packed file up there: name -> (file, frame record)."""
     out: dict[str, tuple[str, dict]] = {}
@@ -542,6 +600,8 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
     if bad:
         print(f"  {bad}")
         return 1
+    if apply:
+        _clear_parts(shoot)
     raw, _ = parts(shoot)
     if not raw.is_dir():
         print(f"  no such shoot: {shoot}")
@@ -1435,6 +1495,8 @@ def repack(shoot: Path, apply: bool) -> int:
     if bad:
         print(f"  {bad}")
         return 1
+    if apply:
+        _clear_parts(shoot)
     raw, _ = parts(shoot)
     whole = load_manifest(shoot)
     man = whole.setdefault("frames", {})
@@ -1469,48 +1531,92 @@ def repack(shoot: Path, apply: bool) -> int:
     for t in (stage.iterdir() if stage.is_dir() else []):
         t.unlink(missing_ok=True)
     groups = bp.group_names(shoot, set(todo))
-    steps, step = len(todo) + len(covered), 0
+    # The bar is the shoot's frames packed, all of them, starting from those
+    # an earlier run packed: a Pack in iCloud stopped half way and started
+    # again picks up where it was, and the bar says so rather than starting
+    # at nought. Letting the ARW copies go is a stage of its own after it
+    # (`letgo`), so its count never reads as frames still to pack.
+    steps, step = len(inside) + len(todo), len(inside)
     packed_n = failed = 0
-    progress("repack", 0, steps)
-    # The packing itself is what takes the time (a minute a burst on one
-    # core), so bursts are packed side by side, as pack_shoot does. Everything
-    # that touches iCloud or the manifest stays here, one burst at a time:
-    # fetching and checking a burst's ARWs as it is handed to a worker, and,
-    # as each comes back, the copy up, the read back and the record.
+    progress("repack", step, steps)
+    if step:
+        # Where this run starts, for the time left to be this run's own.
+        print(f"@@ from repack {step} {steps}", flush=True)
+    # The packing itself takes a minute a burst on one core, so bursts are
+    # packed side by side, as pack_shoot does. Before that, a burst whose ARWs
+    # are only in iCloud has to be downloaded - iCloud stores, it cannot pack -
+    # and one download at a time left most of the cores waiting on it, so
+    # FETCHERS bursts are fetched and checked at once, in threads, a bounded
+    # way ahead of the packing and handed to it in order. What writes to
+    # iCloud or the manifest stays here, one burst at a time: as each comes
+    # back, the copy up, the read back and the record.
     inflight: dict[str, tuple[list[str], str, Path]] = {}   # gid -> names, file, staged output
+    giving_up = threading.Event()
+
+    def fetch(names: list[str]) -> tuple[list[Path], str]:
+        """A burst's ARWs, each here and checked against its record, or why not."""
+        srcs: list[Path] = []
+        for n in names:
+            if giving_up.is_set():
+                return [], "stopped"
+            p, d = raw / n, dest_for(shoot, n)
+            if local(p) and _same_bytes(p, man[n]):
+                srcs.append(p)
+                continue
+            if not local(d) and not materialise(d, stop=giving_up):
+                return [], f"iCloud did not hand {n} over"
+            if not _same_bytes(d, man[n]):
+                return [], f"the ARW of {n} in iCloud does not match what was pushed"
+            srcs.append(d)
+        return srcs, ""
 
     def jobs():
         nonlocal step, failed
-        for gid, names, key in groups:
-            srcs, why = [], ""
-            for n in names:
-                p, d = raw / n, dest_for(shoot, n)
-                if local(p) and _same_bytes(p, man[n]):
-                    srcs.append(p)
-                    continue
-                if not local(d) and not materialise(d):
-                    why = f"iCloud did not hand {n} over"
-                    break
-                if not _same_bytes(d, man[n]):
-                    why = f"the ARW of {n} in iCloud does not match what was pushed"
-                    break
-                srcs.append(d)
-            if why:
-                failed += len(names)
-                step += len(names)
-                progress("repack", step, steps)
-                print(f"    {gid}: not packed: {why}", flush=True)
-                continue
-            file = f"{gid}{bp.EXT}"
-            i = 2
-            taken = {f for _, f, _ in inflight.values()}
-            while file in packs or file in taken or packed_dest(shoot, file).exists():
-                file, i = f"{gid}-{i}{bp.EXT}", i + 1
-            stage.mkdir(parents=True, exist_ok=True)
-            out = stage / file
-            out.unlink(missing_ok=True)
-            inflight[gid] = (names, file, out)
-            yield gid, srcs, key, out           # packed and proved by unpacking before it is written
+        from collections import deque
+        from concurrent.futures import ThreadPoolExecutor
+        fetchers = ThreadPoolExecutor(max_workers=FETCHERS, thread_name_prefix="fetch")
+        ahead: deque = deque()
+        todo = iter(groups)
+
+        def top_up() -> None:
+            while len(ahead) < workers + FETCHERS:
+                g = next(todo, None)
+                if g is None:
+                    return
+                ahead.append((g, fetchers.submit(fetch, g[1])))
+
+        try:
+            top_up()
+            while ahead:
+                (gid, names, key), got = ahead.popleft()
+                srcs, why = got.result()
+                top_up()
+                yield from _one(gid, names, key, srcs, why)
+        finally:
+            # A Stop: the downloads give up rather than hold the way out.
+            giving_up.set()
+            fetchers.shutdown(wait=False, cancel_futures=True)
+
+    def _one(gid: str, names: list[str], key, srcs: list[Path], why: str):
+        """One fetched burst: said and counted when it could not be fetched,
+        else named, staged and handed to a packer."""
+        nonlocal step, failed
+        if why:
+            failed += len(names)
+            step += len(names)
+            progress("repack", step, steps)
+            print(f"    {gid}: not packed: {why}", flush=True)
+            return
+        file = f"{gid}{bp.EXT}"
+        i = 2
+        taken = {f for _, f, _ in inflight.values()}
+        while file in packs or file in taken or packed_dest(shoot, file).exists():
+            file, i = f"{gid}-{i}{bp.EXT}", i + 1
+        stage.mkdir(parents=True, exist_ok=True)
+        out = stage / file
+        out.unlink(missing_ok=True)
+        inflight[gid] = (names, file, out)
+        yield gid, srcs, key, out           # packed and proved by unpacking before it is written
 
     def finish(gid: str, _before: int, _after: int, err: str | None) -> None:
         nonlocal step, failed, packed_n
@@ -1579,9 +1685,9 @@ def repack(shoot: Path, apply: bool) -> int:
     inside = packed_frames(whole)
     gone = back = waiting = 0
     unpacked: dict[str, dict[str, str] | str] = {}
-    for n in sorted(x for x in man if x in inside and dest_for(shoot, x).exists()):
-        progress("repack", min(step, steps), steps)
-        step += 1
+    letgo = sorted(x for x in man if x in inside and dest_for(shoot, x).exists())
+    for i, n in enumerate(letgo):
+        progress("letgo", i, len(letgo))
         file, fr = inside[n]
         arec, q, d = packs[file], packed_dest(shoot, file), dest_for(shoot, n)
         if not q.exists() or q.stat().st_size != arec.get("bytes"):
@@ -1617,7 +1723,10 @@ def repack(shoot: Path, apply: bool) -> int:
         man.pop(n, None)
         gone += 1
         back += size
-    progress("repack", steps, steps)
+    if letgo:
+        progress("letgo", len(letgo), len(letgo))
+    else:
+        progress("repack", steps, steps)
     write_json_atomic(manifest_path(shoot), whole)
     said = f"Packed {packed_n} frames in iCloud; removed {gone} ARW copies, {human(back)} of your iCloud quota back."
     if waiting:
