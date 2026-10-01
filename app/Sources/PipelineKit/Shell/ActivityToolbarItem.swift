@@ -58,6 +58,14 @@ public struct ActivityToolbarItem: View {
     var compact = false
 
     @State private var shown = false
+    /// Whether the line says what is left after the job's name. Decided by
+    /// the window's width (RootView), never by this item measuring itself: a
+    /// ViewThatFits here chose its line from the room the toolbar offered,
+    /// the toolbar sized itself from that line, and with a long title and a
+    /// time left that changed on every poll the two went round each other -
+    /// SwiftUI reported a cycle and the window stopped answering for the
+    /// whole of a Pack in iCloud.
+    let timeLeft: Bool
 
     /// A job running: the only form there was.
     public init(job: Job, waiting: Int = 0, stop: @escaping () -> Void,
@@ -69,9 +77,10 @@ public struct ActivityToolbarItem: View {
     public init(_ subject: Subject, waiting: Int = 0, upNext: [QueueItem] = [],
                 stop: @escaping () -> Void, openLearning: @escaping () -> Void,
                 showTheList: (() -> Void)? = nil, letGo: (() -> Void)? = nil,
-                dismiss: (() -> Void)? = nil, compact: Bool = false) {
+                dismiss: (() -> Void)? = nil, compact: Bool = false, timeLeft: Bool = true) {
         self.subject = subject
         self.compact = compact
+        self.timeLeft = timeLeft
         self.waiting = waiting
         self.upNext = upNext
         self.stop = stop
@@ -128,10 +137,7 @@ public struct ActivityToolbarItem: View {
                 if compact {
                     Text(job.what).font(.callout).lineLimit(1).fixedSize()
                 } else {
-                    ViewThatFits(in: .horizontal) {
-                        name(job, left: job.remaining_text)
-                        name(job, left: "")
-                    }
+                    name(job, left: timeLeft ? job.remaining_text : "")
                 }
             case .ended(let job):
                 Image(systemName: OutcomeLabel.symbol(job.outcome))

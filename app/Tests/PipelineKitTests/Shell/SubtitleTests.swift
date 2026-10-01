@@ -27,6 +27,26 @@ struct SubtitleTests {
         #expect(!RootView.statusItemIsShort(step: nil, windowWidth: 900))
     }
 
+    @Test("the status item goes on to the time left from 1280 pt of window, by the window's width alone")
+    func statusItemTimeLeft() throws {
+        #expect(!RootView.statusItemSaysTimeLeft(windowWidth: 0), "before AppKit has said, the name alone")
+        #expect(!RootView.statusItemSaysTimeLeft(windowWidth: 1100))
+        #expect(RootView.statusItemSaysTimeLeft(windowWidth: 1280))
+        #expect(RootView.statusItemSaysTimeLeft(windowWidth: 1728))
+        // It chose its own line with ViewThatFits, from the room the toolbar
+        // offered, and the toolbar sized itself from that line: a layout
+        // cycle that froze the window for the whole of a Pack in iCloud on a
+        // 1,157-frame shoot. An item in the toolbar never measures itself.
+        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/PipelineKit/Shell/ActivityToolbarItem.swift")
+        let code = try String(contentsOf: source, encoding: .utf8)
+            .split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("///") }
+            .joined(separator: "\n")
+        #expect(!code.contains("ViewThatFits("))
+        #expect(!code.contains("GeometryReader"))
+    }
+
     @Test("any other step: its name, then his count")
     func otherSteps() {
         let s = RootView.subtitle(step: "presets", stepLabel: Strings.Steps.presets, kept: 368, bursts: (140, 288))
