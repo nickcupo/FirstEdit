@@ -1539,6 +1539,9 @@ def repack(shoot: Path, apply: bool) -> int:
     steps, step = len(inside) + len(todo), len(inside)
     packed_n = failed = 0
     progress("repack", step, steps)
+    if step:
+        # Where this run starts, for the time left to be this run's own.
+        print(f"@@ from repack {step} {steps}", flush=True)
     # The packing itself takes a minute a burst on one core, so bursts are
     # packed side by side, as pack_shoot does. Before that, a burst whose ARWs
     # are only in iCloud has to be downloaded - iCloud stores, it cannot pack -

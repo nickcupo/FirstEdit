@@ -846,6 +846,7 @@ def test_pack_in_icloud_started_again_shows_where_it_had_got_to(tmp_path, monkey
     marks = [line for line in capsys.readouterr().out.splitlines() if line.startswith("@@ ")]
     packing = [m for m in marks if m.startswith("@@ repack ")]
     assert packing[0] == "@@ repack 3 5", "it opens at the three frames the first run packed"
+    assert "@@ from repack 3 5" in marks, "and says this run starts there, for its time left"
     assert packing[-1] == "@@ repack 5 5"
     letgo = [m for m in marks if m.startswith("@@ letgo ")]
     assert letgo and letgo[-1] == "@@ letgo 2 2", "then burst-1's two ARW copies go, as a stage of their own"
