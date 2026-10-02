@@ -958,3 +958,107 @@ def test_the_engine_settles_an_old_layout_when_it_starts(tmp_path, monkeypatch):
     studio._settle_layouts()
     assert json.loads((shoot / "decisions" / "selects.json").read_text()) == ["TSC00.ARW"]
     assert (shoot / "cull" / "selects.json").is_symlink()
+
+
+def test_a_copy_up_there_that_nothing_here_will_read_is_left_in_icloud_only(tmp_path, monkeypatch, capsys):
+    """Offloading copied every RAW into iCloud Drive and macOS kept them
+    downloaded: 79.6 GB of a 99.8 GB archive was still on this disk. A copy
+    iCloud has uploaded and that no drop is waiting to read back is evicted;
+    one whose original is still in the shoot is not, drop has to read it."""
+    import studio
+    shoot = _finished_shoot(tmp_path, monkeypatch)
+    (shoot / "raw" / "TSC00.ARW").write_bytes(bytes([0]) * 8192)        # this one is here again
+    archive.push_finished(shoot, apply=True)
+    archive.push_sidecars(shoot, apply=True)
+    monkeypatch.setattr(archive, "icloud_managed", lambda p: True)
+    monkeypatch.setattr(archive, "uploaded", lambda p: True)
+    gone: list[str] = []
+    monkeypatch.setattr(archive, "evict", lambda p: gone.append(p.name) or 4096)
+    copies = archive.evictable(shoot)
+    names = {p.name for p in copies}
+    assert "TSC01.ARW" in names and "TSC00.ARW" not in names, "drop still has TSC00's copy to read"
+    assert "TSC00_DxO.jpg" not in names, "the photograph is still in export/, so its copy waits for drop"
+    capsys.readouterr()
+    archive.evict_shoot(shoot, apply=False)
+    plan = studio._parse_plan("drop", "  x: 0 frames verified in iCloud, 0 refused\n\n  nothing is safe to remove.\n"
+                              + capsys.readouterr().out, {})
+    assert plan["ready"] and plan["counts"]["evict"] == len(copies) and plan["label"].startswith("Free ")
+    archive.evict_shoot(shoot, apply=True)
+    assert sorted(gone) == sorted(p.name for p in copies)
+
+
+def test_nothing_is_evicted_that_icloud_has_not_uploaded(tmp_path, monkeypatch):
+    shoot = _finished_shoot(tmp_path, monkeypatch)
+    monkeypatch.setattr(archive, "icloud_managed", lambda p: True)
+    monkeypatch.setattr(archive, "uploaded", lambda p: False)
+    ran = []
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: ran.append(a))
+    for q in archive.evictable(shoot):
+        assert archive.evict(q) == 0
+    assert ran == []
+
+
+def test_finished_shoots_are_looked_after_without_a_button(tmp_path, monkeypatch):
+    """He chose "back up, remove at once": a finished shoot is backed up and
+    then taken off this Mac by the engine, one shoot and one job at a time,
+    only while nothing else is running, and never twice in three hours."""
+    import studio
+    shoot = _finished_shoot(tmp_path, monkeypatch)
+    monkeypatch.setattr(studio, "ROOT", tmp_path)
+    monkeypatch.setattr(studio, "shoots_dir", lambda: tmp_path / "shoots")
+    monkeypatch.setattr(archive, "icloud_ready", lambda: "")
+    monkeypatch.setattr(studio, "_OFFLOAD_TRIED", {})
+    assert studio.offload_next([shoot])[0] == "push"
+
+    class Jobs:
+        import threading
+        lock = threading.Lock()
+        proc, queue, held = None, [], False
+        asked: list = []
+
+        def enqueue(self, kind, title, cmd, log, shoot="", then=None, why=""):
+            self.asked.append((kind, cmd))
+            return len(self.asked), True
+    jobs = Jobs()
+    got = studio.offload_step(jobs)
+    assert got["what"] == "push" and jobs.asked[-1][0] == "stor-push" and "--apply" in jobs.asked[-1][1]
+    assert studio.offload_step(jobs) is None, "the same shoot is left alone for three hours"
+
+    archive.push_finished(shoot, apply=True)
+    archive.push_sidecars(shoot, apply=True)
+    monkeypatch.setattr(archive, "uploaded", lambda p: True)
+    assert studio.offload_next([shoot])[0] == "drop"
+
+    jobs.queue = [{"id": 1}]
+    studio._OFFLOAD_TRIED.clear()
+    assert studio.offload_step(jobs) is None, "not while anything is waiting"
+    jobs.queue = []
+    (tmp_path / "library.json").write_text(json.dumps({"offload": False}))
+    assert studio.offload_step(jobs) is None, "and not when he has turned it off"
+
+
+def test_an_unfinished_shoot_is_not_offloaded(tmp_path, monkeypatch):
+    import studio
+    shoot = _finished_shoot(tmp_path, monkeypatch)
+    meta = json.loads((shoot / "shoot.json").read_text())
+    meta.pop("finished")
+    (shoot / "shoot.json").write_text(json.dumps(meta))
+    monkeypatch.setattr(archive, "icloud_ready", lambda: "")
+    assert studio.offload_next([shoot]) is None
+
+
+def test_the_panel_says_what_is_on_this_mac_kind_by_kind(tmp_path, monkeypatch):
+    """"It's still confusing what's downloaded and what's not": the panel
+    counted RAWs alone, and said "in iCloud only" over 45 GB on this disk."""
+    import studio
+    shoot = _finished_shoot(tmp_path, monkeypatch)
+    sm = {"here": 0, "bytes_here": 0, "up": 2, "bytes_up": 16384}
+    rows, gate = studio.where_it_is(studio.Shoot(shoot), sm)
+    by = {r["id"]: r for r in rows}
+    assert list(by) == ["raw", "finished", "sidecars", "previews", "downloaded"]
+    assert by["raw"]["mac_text"] == "none" and by["finished"]["mac_text"].startswith("3 · ")
+    assert by["finished"]["note"] == "3 not backed up yet" and gate["finished_todo"] == 3
+    assert gate["sidecars_todo"] == 4 and gate["sidecars_to_gather"] == 4
+    archive.push_finished(shoot, apply=True)
+    rows, gate = studio.where_it_is(studio.Shoot(shoot), sm)
+    assert gate["finished_todo"] == 0 and gate["finished_droppable"] == 3

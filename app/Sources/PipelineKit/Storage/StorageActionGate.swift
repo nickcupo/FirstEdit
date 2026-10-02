@@ -22,9 +22,9 @@ struct StorageActionGate: Equatable {
             // Not held back for Finish: it copies and takes nothing away, and
             // the backup he wants is the same night, before the card is
             // formatted for the next shoot. Removing the local RAWs waits.
-            if a.todo == 0 { return Strings.Storage.pushNothing }
+            if a.todo == 0 && a.finished_todo == 0 && a.sidecars_todo == 0 { return Strings.Storage.pushNothing }
         case .pull:
-            if a.pullable == 0 {
+            if a.pullable == 0 && a.finished_pullable == 0 {
                 return a.up == 0 ? Strings.Storage.nothingInICloud : Strings.Storage.pullNothing
             }
         case .trim:
@@ -41,7 +41,11 @@ struct StorageActionGate: Equatable {
         case .drop:
             // The shoot's own packed bursts go too once the same file is up,
             // so there can be something to free with no RAW left to remove.
-            if a.droppable == 0 && !(a.packed_here > 0 && a.packed_up > 0) {
+            // And the finished photographs up there, the sidecars to gather
+            // and the iCloud Drive copies still downloaded here: on a shoot
+            // whose RAWs had all gone this said "nothing here" over 45 GB.
+            let more = a.finished_droppable + a.sidecars_to_gather + a.evictable
+            if a.droppable == 0 && more == 0 && !(a.packed_here > 0 && a.packed_up > 0) {
                 if a.here == 0 && a.here_evicted == 0 { return Strings.Storage.dropNothingHere }
                 return a.up == 0 ? Strings.Storage.dropNothingUp : Strings.Storage.dropNothingChecked
             }
@@ -69,9 +73,15 @@ struct StorageActionGate: Equatable {
     func size(_ action: StoragePanel.PanelAction) -> String {
         let text: String
         switch action {
-        case .push: text = storage.archive.todo_text
+        case .push:
+            text = storage.archive.todo == 0 && storage.archive.finished_todo > 0
+                ? storage.archive.finished_todo_text : storage.archive.todo_text
         case .pull: text = storage.archive.pullable_text
-        case .drop, .free: text = storage.archive.droppable_text
+        case .drop, .free:
+            let a = storage.archive
+            text = a.droppable > 0 ? a.droppable_text
+                : a.finished_droppable > 0 ? a.finished_droppable_text
+                : a.evictable > 0 ? a.evictable_text : a.droppable_text
         case .reclaim: text = storage.cache.bytes_text
         case .expire, .trim, .repack: text = ""
         }

@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.12
+
+Offloading now gives the disk back. A copy in iCloud Drive is also a copy on
+this Mac until macOS evicts it, and macOS had not: 80 GB of the 100 GB
+archive was still downloaded. Once iCloud has a copy and nothing on this Mac
+needs to read it back, FirstEdit leaves it in iCloud only; opening it brings
+it down again.
+
+Finished shoots look after themselves. Every ten minutes while nothing else
+runs, FirstEdit backs up what a finished shoot has not backed up yet, and
+once iCloud has it, removes it from this Mac with the same checks as Remove
+from This Mac. Set "offload" to false in the library's library.json to
+leave it to the buttons.
+
+The storage panel says what is on this Mac, kind by kind: RAW files,
+finished photos, sidecars, previews, and iCloud copies still downloaded
+here, each with what is in iCloud beside it. Back Up and Remove count all of
+them, not only the RAWs, so a shoot whose RAWs are all in iCloud no longer
+says there is nothing to do while its photographs fill the folder. Files
+cloned by Finder are counted once.
+
 ## v0.1.11
 
 A finished shoot no longer stays on this Mac. Its finished photographs were

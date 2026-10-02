@@ -1152,6 +1152,83 @@ def return_sidecars(shoot: Path, apply: bool) -> int:
     return 0
 
 
+# ------------------------------------------------------------ evicting
+#
+# A copy in iCloud Drive is ALSO a copy on this disk until macOS evicts it,
+# and macOS is in no hurry: with every RAW of every shoot "removed from this
+# Mac", 79.6 GB of the 99.8 GB archive was still downloaded in
+# ~/Library/Mobile Documents. Offloading had moved the bytes from one folder
+# on this disk to another. So once a copy is up - iCloud says so - and
+# nothing on this Mac will need to read it back (the original it stands for
+# is gone from the shoot, so no drop is waiting to check it), it is evicted:
+# the name stays, the bytes are in iCloud only, and opening it brings it down.
+
+
+def evict(p: Path) -> int:
+    """Let iCloud keep the only copy of this file's bytes. Returns the bytes
+    that came back to the disk, 0 when nothing was done. Only a file iCloud
+    manages and says it has uploaded."""
+    try:
+        st = p.lstat()
+    except OSError:
+        return 0
+    if not icloud_managed(p) or not local(p) or uploaded(p) is not True:
+        return 0
+    try:
+        import subprocess
+        subprocess.run(["/usr/bin/brctl", "evict", str(p)], capture_output=True, timeout=120, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return st.st_blocks * 512 if not local(p) else 0
+
+
+def evictable(shoot: Path) -> list[Path]:
+    """The copies of this shoot in iCloud Drive that are downloaded here and
+    that nothing on this Mac will read back: an ARW whose original is not in
+    the shoot, a packed burst none of whose frames are, a finished photograph
+    none of whose names are, and every sidecar copy (the sidecar itself
+    stays in the shoot)."""
+    shoot = Path(shoot).expanduser().resolve()
+    raw, _ = parts(shoot)
+    whole = load_manifest(shoot)
+    here = {p.name for p in originals(raw) if local(p)}
+    out = []
+    for n in whole.get("frames") or {}:
+        if n not in here:
+            out.append(dest_for(shoot, n))
+    for f, rec in (whole.get("packed") or {}).items():
+        if not set(rec.get("frames") or {}) & here:
+            out.append(packed_dest(shoot, f))
+    wanted = {r["stored"] for rel, r in (whole.get("finished") or {}).items() if local(shoot / rel)}
+    for stored in {r["stored"] for r in (whole.get("finished") or {}).values()} - wanted:
+        out.append(finished_dest(shoot, stored))
+    for r in (whole.get(SIDECARS) or {}).values():
+        out.append(ARCHIVE / shoot.name / SIDECARS / r["stored"])
+    return [q for q in out if q.exists() and icloud_managed(q) and local(q)]
+
+
+def evict_shoot(shoot: Path, apply: bool) -> int:
+    shoot = Path(shoot).expanduser().resolve()
+    if not finished(shoot):
+        return 0
+    qs = evictable(shoot)
+    up = [q for q in qs if uploaded(q) is True]
+    if not up:
+        return 0
+    size = sum(q.lstat().st_blocks * 512 for q in up)
+    print(f"  and {len(up)} copies in iCloud Drive still downloaded on this Mac ({human(size)}), "
+          "to be left in iCloud only")
+    if not apply:
+        return 0
+    back = 0
+    for i, q in enumerate(up):
+        progress("evict", i, len(up))
+        back += evict(q)
+    progress("evict", len(up), len(up))
+    print(f"  {human(back)} of iCloud Drive copies left in iCloud only; opening one brings it back down.")
+    return 0
+
+
 # ------------------------------------------------------------ drop
 
 def _sig(p: Path) -> tuple[int, int, int, int] | None:
@@ -2333,7 +2410,11 @@ def _after_drop(p: Path, apply: bool) -> tuple[int, bool]:
     before = _here_count(p)
     rc = drop_finished(p, apply)
     rc = max(rc, gather_sidecars(p, apply) if finished(p) else 0)
-    return rc, _here_count(p) != before or (not apply and _would(p))
+    gone_up = len(evictable(p)) if finished(p) else 0
+    rc = max(rc, evict_shoot(p, apply))
+    after_up = len(evictable(p)) if finished(p) and apply else gone_up
+    return rc, (_here_count(p) != before or after_up != gone_up
+                or (not apply and (_would(p) or any(uploaded(q) is True for q in evictable(p)))))
 
 
 def _after_pull(p: Path, apply: bool) -> tuple[int, bool]:
