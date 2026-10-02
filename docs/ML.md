@@ -1050,7 +1050,7 @@ precision and loses a frame I wanted is a worse change.
 
 ```bash
 ./pl setup                 # once: venv, models, CLIP
-./pl check                 # needs ~/photos/fixtures/faces (not in the repo)
+./pl check                 # needs ../photo-pipeline-data/fixtures/faces (not in the repo)
 ./pl check tests/pets_truth.json          # runs anywhere; the fixture is in the repo
 .venv/bin/python pipeline/eval_pets.py    # the animal gate on 600 Oxford-IIIT Pet images (see the docstring for the data)
 ./pl bench                 # needs a shoot with a decisions/selects.json

@@ -96,6 +96,16 @@ def files(shoot: Path, want: set[str] | None = None) -> dict[str, Path]:
         if root.is_dir():
             for f in root.rglob("*.jp*g"):
                 take(f, RANK[d])
+    # Offloaded: the shoot's finished photographs copied up by archive.push
+    # and removed here keep their record, and the copy up there is still the
+    # finished photograph. From the record, not a walk of iCloud.
+    try:
+        import archive
+        for rel, r in (archive.load_manifest(shoot).get("finished") or {}).items():
+            if not (shoot / rel).exists():
+                take(archive.finished_dest(shoot, r["stored"]), ICLOUD_RANK)
+    except Exception:  # noqa: BLE001
+        pass                                    # no record is not no exports
     need = {s for s in want if s not in best or best[s][0] > ICLOUD_RANK}
     if need:
         try:

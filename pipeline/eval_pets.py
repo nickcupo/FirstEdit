@@ -81,11 +81,10 @@ def load(data: Path, n: int) -> list[tuple[str, bytes, str, tuple]]:
 def main() -> int:
     from faces import FaceJudge
     from quality import Quality
-    # Under the library PHOTOS_ROOT names, like every other dataset this
-    # repo reads (evaluate.py resolves PETS_DIR the same way). The literal
-    # "~/photos" here meant a run on a scratch clone still read the real one.
-    photos = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
-    data = Path(os.environ.get("PETS_DIR", photos / "datasets" / "oxford-pets")).expanduser()
+    # Under common.dev_data(), like every other dataset this repo reads
+    # (evaluate.py resolves PETS_DIR the same way), and never the library.
+    from common import dev_data
+    data = Path(os.environ.get("PETS_DIR", dev_data() / "datasets" / "oxford-pets")).expanduser()
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 600
     rows = load(data, n)
     judge = FaceJudge(quality=Quality())

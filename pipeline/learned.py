@@ -2940,7 +2940,7 @@ def _fingerprint(shoot: Path) -> dict:
     # fingerprint and never asked to be learned from. picks/ is the cull's,
     # wherever the cull is.
     where = library.paths(shoot)
-    for folder_ in (where.raw, where.edit, where.picks):
+    for folder_ in (where.raw, where.edit, where.picks, where.sidecars):
         if folder_.is_dir():
             for p in folder_.glob("*.dop"):
                 dops += 1

@@ -2534,3 +2534,37 @@ def test_partial_gather_note_names_one_missing_keeper(srv, lib, monkeypatch):
     monkeypatch.setattr(studio, "_open", lambda args: None)
     result = post(srv, "/api/open", {"name": lib["gym"].name, "what": "photolab"})
     assert result["note"] == "Opened 1 of 2 keepers in PhotoLab. 1 original was not found: FRAME001.jpg."
+
+
+@pytest.fixture(autouse=True)
+def _no_back_up_on_finish(monkeypatch, request):
+    """Finishing a shoot puts its Back Up in the one job slot, and the tests
+    here about what Finish does to learning are about an empty slot."""
+    if "back_up" not in request.node.name:
+        monkeypatch.setattr(studio, "backup_on_finish", lambda jobs, s: {"ok": True, "queued": True})
+
+
+def test_finishing_a_shoot_starts_its_back_up(srv, monkeypatch):
+    """A finished shoot kept everything on this Mac, with no second copy of
+    its finished photographs anywhere, until someone remembered the Storage
+    panel. Finishing it now puts Back Up to iCloud in line; it only copies."""
+    import studio
+    seen = []
+    monkeypatch.setattr(studio, "backup_on_finish",
+                        lambda jobs, s: seen.append(s.folder.name) or {"ok": True, "queued": True})
+    out = post(srv, "/api/kind", {"name": "2026-01-01-gym", "finished": True})
+    assert seen == ["2026-01-01-gym"] and out["backup"]["ok"] is True
+
+
+def test_the_back_up_on_finish_copies_and_removes_nothing(lib, monkeypatch):
+    seen = {}
+
+    class Jobs:
+        def enqueue(self, kind, title, cmd, log, shoot="", then=None, why=""):
+            seen.update(kind=kind, title=title, cmd=cmd, shoot=shoot)
+            return 7, False
+    s = studio.Shoot(studio.shoots_dir() / "2026-01-01-gym")
+    out = studio.backup_on_finish(Jobs(), s)
+    assert out == {"ok": True, "id": 7, "running": False, "queued": True}
+    assert seen["kind"] == "stor-push" and seen["cmd"][2:4] == ["push", str(s.folder)]
+    assert "--apply" in seen["cmd"] and seen["title"] == "backing up 2026-01-01-gym to iCloud"

@@ -796,3 +796,165 @@ def test_a_flat_shoot_with_both_culls_takes_the_one_holding_cull_csv(tmp_path):
     assert std / "cull" not in reclaim.cull_dirs(std / "raw")
     # And given its raw/, archive answers for the shoot.
     assert archive.parts(std / "raw") == ((std / "raw").resolve(), (std / "cull").resolve())
+
+
+def _roll(path: Path, frames: dict[str, str]) -> Path:
+    """A packed burst as far as its header goes: the frames it says it holds."""
+    import struct
+    man = json.dumps({"version": 1, "frames": [{"name": n, "sha256": h} for n, h in frames.items()]}).encode()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"FEBURST\x01" + struct.pack("<Q", len(man)) + man + b"\0" * 4096)
+    return path
+
+
+def test_drop_takes_a_pack_whose_frames_are_all_in_icloud_already(tmp_path, monkeypatch, capsys):
+    """A pack made after the RAWs had gone up is a whole second copy that no
+    push ever copies, and drop kept it because no burst of its name was up
+    there: 15 GB of one shoot sat on the disk so. When every frame it holds
+    is recorded up there with the same bytes, it goes with the originals."""
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    shoot = _shoot(tmp_path, frames=3, keepers=[])
+    man = json.loads((shoot / "cull" / archive.MANIFEST).read_text())["frames"]
+    spare = _roll(shoot / "packed" / "burst-1.roll", {n: man[n]["sha256"] for n in ("TSC00.ARW", "TSC01.ARW")})
+    # One frame whose bytes up there are not the ones packed: that pack is
+    # the only copy of what it holds and stays.
+    odd = _roll(shoot / "packed" / "burst-2.roll", {"TSC02.ARW": "0" * 64})
+    for n in man:
+        (shoot / "raw" / n).unlink()          # dropped earlier, as on the real shoot
+
+    assert archive.drop(shoot, apply=False) == 0
+    out = capsys.readouterr().out
+    assert "and 1 packed bursts on this Mac" in out and "nothing was removed" in out
+    assert spare.exists()
+    assert archive.drop(shoot, apply=True) == 0
+    assert not spare.exists() and odd.exists()
+
+
+def test_drop_keeps_a_pack_while_a_frame_of_it_is_still_here(tmp_path, monkeypatch, capsys):
+    """While a frame's own original is still in raw/, the pack is not what
+    stands between that frame and iCloud, and drop has its original to judge
+    rather than the pack."""
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    shoot = _shoot(tmp_path, frames=1, keepers=[])
+    man = json.loads((shoot / "cull" / archive.MANIFEST).read_text())["frames"]
+    pack = _roll(shoot / "packed" / "burst-1.roll", {"TSC00.ARW": man["TSC00.ARW"]["sha256"]})
+    assert archive.spare_packs(shoot, archive.load_manifest(shoot), archive.originals(shoot / "raw")) == []
+    assert pack.exists()
+
+
+def test_drop_lets_the_decode_of_a_dropped_frame_go(tmp_path, monkeypatch):
+    """The decode the viewer keeps is a frame's biggest leftover once its RAW
+    is in iCloud, and the viewer cannot remake it or use it for anything the
+    preview does not give. It goes with the original; another frame's stays."""
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    shoot = _shoot(tmp_path, frames=2, keepers=[])
+    dec = shoot / "cull" / "decoded"
+    dec.mkdir()
+    (dec / "TSC00.jpg").write_bytes(b"J" * 9000)
+    (dec / "TSC09.jpg").write_bytes(b"J" * 9000)      # a frame drop did not take
+    assert archive.drop(shoot, apply=True) == 0
+    assert not (dec / "TSC00.jpg").exists() and (dec / "TSC09.jpg").exists()
+
+
+def _finished_shoot(tmp_path, monkeypatch):
+    """A finished shoot whose RAWs are all in iCloud already, with what was
+    left behind on the real ones: the exports (one filed twice), a delivery
+    copy, and the sidecars in raw/ and edit/."""
+    monkeypatch.setattr(archive, "ARCHIVE", tmp_path / "icloud")
+    shoot = _shoot(tmp_path, frames=2, keepers=[])
+    for n in ("TSC00.ARW", "TSC01.ARW"):
+        (shoot / "raw" / n).unlink()
+        (shoot / "raw" / f"{n}.dop").write_text(f"Overrides = {{ {n} }}")
+    (shoot / "edit" / "edited").mkdir(parents=True)
+    (shoot / "edit" / "TSC00.ARW.dop").write_text("Overrides = { TSC00.ARW }")        # the same
+    (shoot / "edit" / "TSC01.ARW.dop").write_text("Overrides = { a later hand }")     # not the same
+    (shoot / "export").mkdir()
+    (shoot / "export" / "TSC00_DxO.jpg").write_bytes(b"\xff\xd8" + b"A" * 5000)
+    (shoot / "edit" / "edited" / "TSC00_DxO.jpg").write_bytes(b"\xff\xd8" + b"A" * 5000)
+    (shoot / "upload" / "Gym").mkdir(parents=True)
+    (shoot / "upload" / "Gym" / "TSC00_DxO.jpg").write_bytes(b"\xff\xd8" + b"A" * 5000)
+    (shoot / "upload" / "_store" / "previews").mkdir(parents=True)
+    (shoot / "upload" / "_store" / "previews" / "x.jpg").write_bytes(b"\xff\xd8p")  # read live: stays
+    return shoot
+
+
+def test_finished_photos_and_sidecars_go_up_come_off_and_come_back(tmp_path, monkeypatch, capsys):
+    """Every RAW of every shoot had gone to iCloud and the library still held
+    20 GB: the finished photographs were never archived at all, and raw/ held
+    1,500 sidecars of RAWs that were no longer there. Both go up; the photos
+    come off this Mac once checked; the sidecars are gathered out of raw/ and
+    edit/ and never deleted, and both come back on Bring Back."""
+    import studio
+    shoot = _finished_shoot(tmp_path, monkeypatch)
+
+    archive.push_finished(shoot, apply=False)
+    archive.push_sidecars(shoot, apply=False)
+    plan = studio._parse_plan("push", capsys.readouterr().out, {})
+    assert plan["ready"] and plan["counts"]["finished"] == 3 and plan["counts"]["sidecars"] == 4
+    assert archive.push_finished(shoot, apply=True) == 0 and archive.push_sidecars(shoot, apply=True) == 0
+    up = sorted(p.relative_to(tmp_path / "icloud").as_posix() for p in (tmp_path / "icloud").rglob("*.jpg"))
+    assert up == [f"{shoot.name}/finished/export/TSC00_DxO.jpg"], "one photograph is one copy up there"
+
+    capsys.readouterr()
+    assert archive._either(1, archive._after_drop, shoot, False) == 0
+    plan = studio._parse_plan("drop", capsys.readouterr().out, {})
+    assert plan["ready"] and plan["counts"]["finished"] == 3 and plan["counts"]["sidecars"] == 4
+    assert archive._either(1, archive._after_drop, shoot, True) == 0
+    assert not list(shoot.glob("export/*.jpg")) and not list(shoot.glob("upload/Gym/*.jpg"))
+    assert (shoot / "upload" / "_store" / "previews" / "x.jpg").exists()
+    assert not list((shoot / "raw").glob("*.dop")) and not list((shoot / "edit").glob("*.dop"))
+    kept = shoot / "decisions" / "sidecars"
+    assert sorted(p.name for p in kept.glob("*.dop")) == ["TSC00.ARW.dop", "TSC01.ARW.dop"]
+    assert (kept / "TSC01.ARW.dop").read_text() == "Overrides = { a later hand }"
+    assert [p.read_text() for p in (kept / "older").iterdir()] == ["Overrides = { TSC01.ARW }"]
+
+    assert archive.pull_finished(shoot, apply=True) == 0
+    assert (shoot / "export" / "TSC00_DxO.jpg").read_bytes() == b"\xff\xd8" + b"A" * 5000
+    assert (shoot / "upload" / "Gym" / "TSC00_DxO.jpg").exists()
+    (shoot / "raw" / "TSC00.ARW").write_bytes(bytes([0]) * 8192)     # the RAW back from iCloud
+    archive.return_sidecars(shoot, apply=True)
+    assert (shoot / "raw" / "TSC00.ARW.dop").exists() and not (kept / "TSC00.ARW.dop").exists()
+
+
+def test_finished_photos_stay_until_the_shoot_is_finished(tmp_path, monkeypatch):
+    shoot = _finished_shoot(tmp_path, monkeypatch)
+    meta = json.loads((shoot / "shoot.json").read_text())
+    meta.pop("finished")
+    (shoot / "shoot.json").write_text(json.dumps(meta))
+    archive.push_finished(shoot, apply=True)
+    archive._either(1, archive._after_drop, shoot, True)
+    assert (shoot / "export" / "TSC00_DxO.jpg").exists() and (shoot / "raw" / "TSC00.ARW.dop").exists()
+
+
+def test_the_learner_reads_the_gathered_sidecars(tmp_path):
+    import library
+    shoot = tmp_path / "shoots" / "x"
+    (shoot / "raw").mkdir(parents=True)
+    assert library.paths(shoot).sidecars == shoot / "decisions" / "sidecars"
+
+
+def test_an_offloaded_export_is_still_the_frames_finished_photo(tmp_path, monkeypatch):
+    """The Done card and the Instagram step ask exports.files which frames
+    are finished. Once a shoot's photographs are offloaded, the answer is the
+    copy up there, not "never exported"."""
+    import exports
+    monkeypatch.setattr(exports, "frames", lambda shoot: {"TSC00": shoot / "raw" / "TSC00.ARW"})
+    shoot = _finished_shoot(tmp_path, monkeypatch)
+    archive.push_finished(shoot, apply=True)
+    archive._either(1, archive._after_drop, shoot, True)
+    got = exports.files(shoot)
+    assert got["TSC00"] == archive.finished_dest(shoot, "export/TSC00_DxO.jpg")
+
+
+def test_the_engine_settles_an_old_layout_when_it_starts(tmp_path, monkeypatch):
+    """./pl migrate existed and nothing ran it, so a library kept shoots
+    half-migrated: decisions still in cull/, compatibility links missing."""
+    import studio
+    monkeypatch.setattr(studio, "ROOT", tmp_path)
+    shoot = tmp_path / "shoots" / "2026-01-01-gym"
+    (shoot / "raw").mkdir(parents=True)
+    (shoot / "cull").mkdir()
+    (shoot / "cull" / "selects.json").write_text(json.dumps(["TSC00.ARW"]))
+    studio._settle_layouts()
+    assert json.loads((shoot / "decisions" / "selects.json").read_text()) == ["TSC00.ARW"]
+    assert (shoot / "cull" / "selects.json").is_symlink()

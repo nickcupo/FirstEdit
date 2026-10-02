@@ -527,7 +527,7 @@ def hand_copies(shoot: Path) -> dict[str, Path]:
     # the 98 edits of ducksAndDeadlifts once it asked this instead of its own
     # copy of the rule.
     where = library.paths(shoot)
-    folders = [where.raw, where.edit, where.picks]
+    folders = [where.raw, where.edit, where.picks, where.sidecars]
     key = str(shoot)
     stamp = tuple(p.stat().st_mtime_ns if p.is_dir() else 0 for p in folders)
     got = _HANDS.get(key)
@@ -2175,8 +2175,8 @@ def shoot_overrides(shoot: Path, min_n: int = 3, only: set[str] | None = None) -
     # "DeepRaw2RGBv7" on 198 frames and his 92 Fluo decisions included, so
     # what he actually chose there survives both gates intact.
     pipeline_wrote: dict[str, set[str]] = {}
-    rawdir = library.paths(shoot).raw
-    for f in sorted(rawdir.glob("*.dop"))[:400]:
+    where = library.paths(shoot)
+    for f in sorted([*where.raw.glob("*.dop"), *where.sidecars.glob("*.dop")])[:400]:
         base = _block(f.read_text(errors="ignore"), "Base")
         for k, v in re.findall(r"^\s*([A-Za-z0-9_]+) = ([^\n{]+?),\s*$", base, re.M):
             pipeline_wrote.setdefault(k, set()).add(v.strip())
@@ -2562,9 +2562,9 @@ def sidecar_base_id(shoot: Path) -> str | None:
     so the Base they were measured under is recorded beside them and checked
     before they are used."""
     from presets import base_id
-    rawdir = library.paths(shoot).raw
+    where = library.paths(shoot)
     seen: dict[str, int] = {}
-    for f in sorted(rawdir.glob("*.dop"))[:200]:
+    for f in sorted([*where.raw.glob("*.dop"), *where.sidecars.glob("*.dop")])[:200]:
         b = flat_block(f.read_text(errors="ignore"), "Base")
         if not b:
             continue

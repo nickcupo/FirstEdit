@@ -90,7 +90,7 @@ public struct LibraryStorage: View {
     /// the library's own order.
     static func bySize(_ rows: [ShootRowOK]) -> [ShootRowOK] {
         rows.enumerated().sorted { a, b in
-            switch (a.element.storage?.bytes_here, b.element.storage?.bytes_here) {
+            switch (a.element.storage?.size, b.element.storage?.size) {
             case let (x?, y?) where x != y: return x > y
             case (.some, nil): return true
             case (nil, .some): return false
@@ -100,7 +100,7 @@ public struct LibraryStorage: View {
     }
 
     static func spoken(_ row: ShootRowOK) -> String {
-        [row.name, row.storage?.bytes_here_text ?? "", row.storage?.phrase ?? ""]
+        [row.name, row.storage?.sizeText ?? "", row.storage?.phrase ?? ""]
             .filter { !$0.isEmpty }.joined(separator: ". ")
     }
 
@@ -130,7 +130,7 @@ struct ShootStorageRow: View {
             Spacer(minLength: Tokens.Metric.relatedGap)
             // The engine's own figure and phrase, never one this page worked
             // out.
-            if let size = row.storage?.bytes_here_text, !size.isEmpty {
+            if let size = row.storage?.sizeText, !size.isEmpty {
                 Text(size).countStyle()
             }
             Text(row.storage?.phrase ?? "")

@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.1.11
+
+A finished shoot no longer stays on this Mac. Its finished photographs were
+never backed up at all: every RAW could be in iCloud while export/, the
+delivery folders and the reels held the only copy of the work. Back Up to
+iCloud now takes them with the RAWs, one copy of each photograph however many
+folders it is filed in, and every sidecar with them, so your edits have a
+second copy too. Finishing a shoot starts its backup on its own.
+
+Remove from This Mac takes everything that is safely up there: the RAWs, the
+full-size decode the viewer kept of each (about 7 MB a frame), the finished
+photographs, and a packed copy of the shoot nothing had uploaded because its
+RAWs had gone up first. The sidecars of frames in iCloud are gathered out of
+raw/ and edit/ into decisions/sidecars/, which the learner reads, and go back
+beside their RAWs when you bring them back. Bring Back from iCloud brings the
+finished photographs down again.
+
+The library's Storage page shows what each shoot's whole folder takes, not
+only its RAWs, and says when a shoot's finished photographs are only on this
+Mac. The updater's and the first run's logs are kept in FirstEdit's own
+folder rather than at the top of the photo library, and a shoot still laid
+out the old way is put right when FirstEdit starts.
+
 ## v0.1.10
 
 FirstEdit no longer freezes while a long job runs. The toolbar's progress

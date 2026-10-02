@@ -418,3 +418,21 @@ def test_the_panel_says_what_new_shoots_are_given(tmp_path, monkeypatch):
     (tmp_path / "library.json").write_text(json.dumps({"retain_days": 90}))
     r = studio.storage(studio.Shoot(shoot))["retain"]
     assert (r["library_days"], r["days"], r["source"]) == (90, 90, "library")
+
+
+def test_a_shoot_row_also_says_what_its_whole_folder_takes(tmp_path, monkeypatch):
+    """Every shoot of his read "in iCloud only" beside no figure at all while
+    the library held 62 GB: the RAWs had gone and everything beside them had
+    not. The library's page shows and sorts by the whole folder, and a shoot
+    whose finished photographs have no copy up there says so."""
+    _elsewhere(tmp_path, monkeypatch)
+    shoot = _shoot(tmp_path)
+    man = {f"TSC0{i}.ARW": _frame(shoot, f"TSC0{i}.ARW", up=True) for i in range(4)}
+    _manifest(shoot, man)
+    (shoot / "export").mkdir()
+    (shoot / "export" / "TSC00_DxO.jpg").write_bytes(b"\xff\xd8" + b"x" * 200_000)
+    studio._FOLDER_BYTES.clear()
+    home = studio._stor_home(studio.Shoot(shoot))
+    assert home["folder_bytes"] >= 200_000 + home["bytes_here"]
+    assert home["folder_text"] == common.human(home["folder_bytes"])
+    assert home["phrase"].endswith("; 1 finished photo only on this Mac")

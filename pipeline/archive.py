@@ -799,6 +799,359 @@ def push(shoot: Path, apply: bool, force: bool = False, form: str = "raw") -> in
     return 0 if not failed else 1
 
 
+# ------------------------------------------------------------ finished work
+#
+# The exported photographs: what PhotoLab writes into export/ or edit/edited/,
+# the reels, the delivery folders. These were never archived at all, so a
+# shoot whose RAWs had all gone to iCloud still kept every finished JPEG on
+# this Mac and nowhere else - about 20 GB of the library, and the one copy of
+# the work. They go up beside the RAWs, are read back and recorded, and come
+# off this Mac with the RAWs once iCloud vouches for them.
+
+FINISHED = "finished"
+FINISHED_DIRS = ("export", "edit", "reels", "upload", "cull/picks/edited")
+FINISHED_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".mp4", ".mov", ".m4v"}
+# Read live by the delivery step and remade by it at will: kept here.
+FINISHED_SKIP = ("upload/_store/previews", "upload/_store/tmp", "upload/_store/zips")
+
+
+def finished_dest(shoot: Path, rel: str) -> Path:
+    return ARCHIVE / Path(shoot).name / FINISHED / rel
+
+
+def finished_files(shoot: Path) -> list[Path]:
+    """Every finished photograph in the shoot with its bytes on this disk.
+    Not a name that is also an original in raw/ (a camera JPEG linked into
+    edit/ is the RAW archive's to look after), not a link, not a name iCloud
+    has emptied."""
+    shoot = Path(shoot)
+    raw, _ = parts(shoot)
+    out = []
+    names = None
+    for d in FINISHED_DIRS:
+        root = shoot / d
+        if not root.is_dir():
+            continue
+        for q in sorted(root.rglob("*")):
+            rel = q.relative_to(shoot).as_posix()
+            if q.suffix.lower() not in FINISHED_EXTS or q.is_symlink() or not q.is_file():
+                continue
+            if any(rel.startswith(x + "/") for x in FINISHED_SKIP):
+                continue
+            st = q.lstat()
+            if st.st_nlink > 1:
+                names = names if names is not None else inode_names(shoot)
+                if any(raw in n.parents for n in names.get((st.st_dev, st.st_ino), [])):
+                    continue
+            if not local(q):
+                continue
+            out.append(q)
+    return out
+
+
+def push_finished(shoot: Path, apply: bool) -> int:
+    """The finished photographs up beside the RAWs, each read back before it
+    is recorded. A photograph whose bytes are already up under another of
+    its names (export/ and the same JPEG filed in a delivery folder) is
+    recorded against that one copy and not sent twice."""
+    shoot = Path(shoot).expanduser().resolve()
+    bad = icloud_ready()
+    if bad:
+        print(f"  {bad}")
+        return 1
+    whole = load_manifest(shoot)
+    rec = whole.setdefault("finished", {})
+    by_sha = {r["sha256"]: r["stored"] for r in rec.values() if finished_dest(shoot, r["stored"]).exists()}
+    todo = []
+    for q in finished_files(shoot):
+        rel = q.relative_to(shoot).as_posix()
+        r = rec.get(rel)
+        if r and finished_dest(shoot, r["stored"]).exists() and r.get("bytes") == q.stat().st_size:
+            continue
+        todo.append((q, rel))
+    if not todo:
+        return 0
+    # Counted by what actually goes up: the same JPEG filed in export/ and in
+    # three delivery folders is one copy up there, and the figure on the
+    # button said 25.7 GB for a shoot whose distinct photographs were half that.
+    shas = {rel: sha256(q) for q, rel in todo}
+    sent, total = set(by_sha), 0
+    for q, rel in todo:
+        if shas[rel] not in sent:
+            sent.add(shas[rel])
+            total += q.stat().st_size
+    print(f"  would copy {len(todo)} finished photos, {human(total)}, to {finished_dest(shoot, '')}")
+    if not apply:
+        return 0
+    manifest_path(shoot).parent.mkdir(parents=True, exist_ok=True)
+    ok = failed = 0
+    for i, (q, rel) in enumerate(todo, 1):
+        progress("push", i - 1, len(todo))
+        try:
+            want = shas[rel]
+            stored = by_sha.get(want)
+            if stored is None:
+                d = finished_dest(shoot, rel)
+                d.parent.mkdir(parents=True, exist_ok=True)
+                tmp = d.parent / f".{d.name}.part"
+                try:
+                    shutil.copyfile(q, tmp)
+                    if sha256(tmp) != want:
+                        tmp.unlink(missing_ok=True)
+                        print(f"    {rel}: copied wrong, left alone")
+                        failed += 1
+                        continue
+                    os.replace(tmp, d)
+                except BaseException:
+                    tmp.unlink(missing_ok=True)
+                    raise
+                stored = by_sha[want] = rel
+            rec[rel] = {"bytes": q.stat().st_size, "sha256": want, "stored": stored,
+                        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+            ok += 1
+        except OSError as e:
+            print(f"    {rel}: {e}")
+            failed += 1
+        except BaseException:
+            write_json_atomic(manifest_path(shoot), whole)
+            raise
+        if i % 50 == 0:
+            write_json_atomic(manifest_path(shoot), whole)
+    progress("push", len(todo), len(todo))
+    write_json_atomic(manifest_path(shoot), whole)
+    print(f"  {ok} finished photos copied and verified, {failed} failed.")
+    return 0 if not failed else 1
+
+
+def drop_finished(shoot: Path, apply: bool) -> int:
+    """Finished photographs off this Mac, each only once its copy in iCloud
+    has been read back, matched to its record and vouched for by iCloud, and
+    the file here is the one that was copied. Waits for Finish, as the RAWs
+    do: until then they are still being exported and filed."""
+    shoot = Path(shoot).expanduser().resolve()
+    whole = load_manifest(shoot)
+    rec = whole.get("finished") or {}
+    if not rec or not finished(shoot) or icloud_ready():
+        return 0
+    checked: dict[str, str] = {}
+    safe, kept = [], 0
+    for q in finished_files(shoot):
+        rel = q.relative_to(shoot).as_posix()
+        r = rec.get(rel)
+        if not r:
+            continue
+        d = finished_dest(shoot, r["stored"])
+        if r["stored"] not in checked:
+            why = ""
+            if not d.exists():
+                why = "not in iCloud"
+            elif not local(d):
+                why = "the iCloud copy is evicted; it must come down to be checked"
+            elif d.stat().st_size != r.get("bytes"):
+                why = "the iCloud copy is a different size"
+            else:
+                why = _unvouched(d) or ("" if sha256(d) == r["sha256"] else "the iCloud copy does not match")
+            checked[r["stored"]] = why
+        if checked[r["stored"]] or q.stat().st_size != r.get("bytes") or sha256(q) != r["sha256"]:
+            kept += 1
+            continue
+        safe.append((q, d, _sig(q), _sig(d)))
+    if not safe:
+        return 0
+    size = sum(q.lstat().st_blocks * 512 for q, *_ in safe)
+    print(f"  and {len(safe)} finished photos on this Mac ({human(size)}) whose copy in iCloud is checked"
+          + (f"; {kept} kept" if kept else ""))
+    if not apply:
+        return 0
+    gone = back = 0
+    for q, d, qsig, dsig in safe:
+        if _sig(q) != qsig or _sig(d) != dsig or _unvouched(d):
+            continue
+        st = q.lstat()
+        try:
+            q.unlink()
+        except OSError as e:
+            print(f"    {q.name}: {e}")
+            continue
+        gone += 1
+        back += st.st_blocks * 512
+    print(f"  removed {gone} finished photos; {human(back)} back. Bring Back from iCloud brings them down again.")
+    return 0
+
+
+def pull_finished(shoot: Path, apply: bool) -> int:
+    """Every finished photograph recorded up there and not here, back where
+    it was, read back against its record before it takes its name."""
+    shoot = Path(shoot).expanduser().resolve()
+    rec = load_manifest(shoot).get("finished") or {}
+    want = [(rel, r) for rel, r in sorted(rec.items()) if not local(shoot / rel)]
+    if not want:
+        return 0
+    print(f"  and {len(want)} finished photos to bring back, {human(sum(r.get('bytes', 0) for _, r in want))}")
+    if not apply:
+        return 0
+    bad = 0
+    for i, (rel, r) in enumerate(want, 1):
+        progress("pull", i - 1, len(want))
+        src, dst = finished_dest(shoot, r["stored"]), shoot / rel
+        tmp = dst.parent / f".{dst.name}.part"
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, tmp)
+            if sha256(tmp) != r["sha256"]:
+                raise OSError("came back different from what was copied up")
+            os.replace(tmp, dst)
+        except OSError as e:
+            tmp.unlink(missing_ok=True)
+            print(f"    {rel}: {e}")
+            bad += 1
+    progress("pull", len(want), len(want))
+    print(f"  {len(want) - bad} finished photos back, {bad} failed.")
+    return 1 if bad else 0
+
+
+# ------------------------------------------------------------ sidecars
+#
+# His edits: a .dop (PhotoLab) or .xmp beside each RAW, and the copy gather
+# puts beside the link in edit/. They were never archived, so the edits of a
+# shoot whose RAWs had gone up lived on this Mac alone, and once the RAWs had
+# gone raw/ and edit/ held nothing but 1,500 sidecars each. They go up with
+# the RAWs; when a frame's RAW leaves, its sidecar is gathered into
+# decisions/sidecars/, which everything that learns from his edits reads
+# (library.ShootPaths.sidecars); and it goes back beside the RAW when the RAW
+# comes back, which is where PhotoLab looks. None is ever deleted, except a
+# copy byte for byte the same as the one kept.
+
+SIDECAR_EXTS = (".dop", ".xmp")
+SIDECARS = "sidecars"
+
+
+def _frame_of(name: str) -> str:
+    """The frame a sidecar belongs to, by number: TSC0001.ARW.dop and
+    TSC0001.xmp both say TSC0001."""
+    return name.split(".", 1)[0].lower()
+
+
+def sidecar_files(shoot: Path) -> list[Path]:
+    where = library.paths(Path(shoot))
+    out = []
+    for folder in (where.raw, where.edit, where.sidecars):
+        if folder.is_dir():
+            out += sorted(q for q in folder.iterdir()
+                          if q.suffix.lower() in SIDECAR_EXTS and q.is_file() and not q.is_symlink() and local(q))
+    return out
+
+
+def push_sidecars(shoot: Path, apply: bool) -> int:
+    """Every sidecar up beside the RAWs, again whenever it has changed: they
+    are edited after the RAWs went up, and the copy up there is the newest."""
+    shoot = Path(shoot).expanduser().resolve()
+    if icloud_ready():
+        return 0
+    whole = load_manifest(shoot)
+    rec = whole.setdefault(SIDECARS, {})
+    todo = []
+    for q in sidecar_files(shoot):
+        rel = q.relative_to(shoot).as_posix()
+        want = sha256(q)
+        r = rec.get(rel)
+        if r and r.get("sha256") == want and (ARCHIVE / shoot.name / SIDECARS / r["stored"]).exists():
+            continue
+        todo.append((q, rel, want))
+    if not todo:
+        return 0
+    print(f"  and {len(todo)} sidecars (your edits), {human(sum(q.stat().st_size for q, *_ in todo))}")
+    if not apply:
+        return 0
+    manifest_path(shoot).parent.mkdir(parents=True, exist_ok=True)
+    bad = 0
+    for q, rel, want in todo:
+        d = ARCHIVE / shoot.name / SIDECARS / rel
+        tmp = d.parent / f".{d.name}.part"
+        try:
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(q, tmp)
+            if sha256(tmp) != want:
+                raise OSError("copied wrong")
+            os.replace(tmp, d)
+            rec[rel] = {"bytes": q.stat().st_size, "sha256": want, "stored": rel,
+                        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        except OSError as e:
+            tmp.unlink(missing_ok=True)
+            print(f"    {rel}: {e}")
+            bad += 1
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            write_json_atomic(manifest_path(shoot), whole)
+            raise
+    write_json_atomic(manifest_path(shoot), whole)
+    print(f"  {len(todo) - bad} sidecars copied and verified, {bad} failed.")
+    return 1 if bad else 0
+
+
+def sidecar_moves(shoot: Path) -> list[Path]:
+    """The sidecars in raw/ and edit/ of frames whose RAW is not on this Mac."""
+    where = library.paths(Path(shoot))
+    here = {_frame_of(p.name) for p in originals(where.raw) if local(p)}
+    out = []
+    for folder in (where.raw, where.edit):
+        if folder.is_dir():
+            out += [q for q in sorted(folder.iterdir())
+                    if q.suffix.lower() in SIDECAR_EXTS and q.is_file() and not q.is_symlink()
+                    and _frame_of(q.name) not in here and local(q)]
+    return out
+
+
+def gather_sidecars(shoot: Path, apply: bool) -> int:
+    """The sidecars of frames whose RAW is not on this Mac, out of raw/ and
+    edit/ into decisions/sidecars/. A second copy that is byte for byte the
+    one kept goes; one that differs is kept beside it under older/, the newer
+    of the two (by when it was written) taking the name."""
+    shoot = Path(shoot).expanduser().resolve()
+    where = library.paths(shoot)
+    moves = sidecar_moves(shoot)
+    if not moves:
+        return 0
+    print(f"  and {len(moves)} sidecars of frames in iCloud, gathered into {where.sidecars.relative_to(shoot)}/")
+    if not apply:
+        return 0
+    where.sidecars.mkdir(parents=True, exist_ok=True)
+    for q in moves:
+        t = where.sidecars / q.name
+        if not t.exists():
+            os.replace(q, t)
+        elif sha256(t) == sha256(q):
+            q.unlink()
+        else:
+            old = where.sidecars / "older"
+            old.mkdir(exist_ok=True)
+            newer, other = (q, t) if q.stat().st_mtime > t.stat().st_mtime else (t, q)
+            n = 1
+            while (old / f"{n}-{q.name}").exists():
+                n += 1
+            os.replace(other, old / f"{n}-{q.name}")
+            if newer is q:
+                os.replace(q, t)
+    return 0
+
+
+def return_sidecars(shoot: Path, apply: bool) -> int:
+    """Back beside the RAW, for every frame whose RAW is on this Mac again."""
+    shoot = Path(shoot).expanduser().resolve()
+    where = library.paths(shoot)
+    if not where.sidecars.is_dir():
+        return 0
+    here = {_frame_of(p.name) for p in originals(where.raw) if local(p)}
+    back = [q for q in sorted(where.sidecars.iterdir())
+            if q.is_file() and q.suffix.lower() in SIDECAR_EXTS and _frame_of(q.name) in here]
+    if back and apply:
+        for q in back:
+            if not (where.raw / q.name).exists():
+                os.replace(q, where.raw / q.name)
+        print(f"  {len(back)} sidecars back beside their RAWs")
+    return 0
+
+
 # ------------------------------------------------------------ drop
 
 def _sig(p: Path) -> tuple[int, int, int, int] | None:
@@ -826,6 +1179,98 @@ def _unvouched(d: Path) -> str:
     if icloud_managed(d):
         return "iCloud would not say whether it has uploaded the copy"
     return ""
+
+
+def _pack_frames(q: Path) -> dict[str, str] | None:
+    """name -> SHA-256 of every frame a packed burst on this disk holds, from
+    its header alone, or None when it is not one that can be read."""
+    try:
+        b = _burstpack()
+        with open(q, "rb") as fh:
+            head = fh.read(len(b.MAGIC) + 8)
+            if len(head) < len(b.MAGIC) + 8 or head[:len(b.MAGIC)] != b.MAGIC:
+                return None
+            n = int.from_bytes(head[len(b.MAGIC):], "little")
+            man = b.read_manifest(head + fh.read(n))[0]
+        return {f["name"]: f["sha256"] for f in man["frames"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def spare_packs(shoot: Path, whole: dict, frames: list[Path]) -> list[tuple[Path, list[Path]]]:
+    """Packed bursts on this Mac that nothing up there is a copy of, but whose
+    every frame is: the frame's RAW (or a packed burst holding it) recorded in
+    iCloud with the same bytes, and vouched for by iCloud. With the copy each
+    leans on.
+
+    These are what a pack made after the RAWs had already gone up leaves: a
+    whole second copy of the shoot that push has nothing to do with (the
+    frames are up) and that drop used to keep because no burst of that name
+    was ever copied. 15 GB of one shoot sat so. Nothing in iCloud is read
+    here: each copy was read back and matched to its record when it went up,
+    and the frame's own original was dropped against it, so the pack is the
+    only thing on this disk that still holds it. A frame whose original is
+    still here is not a spare's to vouch for and keeps the pack."""
+    here = {p.name for p in frames}
+    man = whole.get("frames") or {}
+    recorded = whole.get("packed") or {}
+    packed = packed_frames(whole)
+    out = []
+    for q in local_packed(shoot):
+        if q.name in recorded or not local(q):
+            continue
+        held = _pack_frames(q)
+        if not held:
+            continue
+        ups: list[Path] = []
+        for name, sha in held.items():
+            if name in here:
+                break
+            rec = man.get(name)
+            if rec and rec.get("sha256") == sha:
+                d = dest_for(shoot, name)
+                if d.exists() and d.stat().st_size == rec.get("bytes") and not _unvouched(d):
+                    ups.append(d)
+                    continue
+            if name in packed and packed[name][1].get("sha256") == sha:
+                d = packed_dest(shoot, packed[name][0])
+                if d.exists() and not _unvouched(d):
+                    ups.append(d)
+                    continue
+            break
+        else:
+            out.append((q, sorted(set(ups))))
+    return out
+
+
+def _let_decode_go(shoot: Path, stem: str) -> int:
+    """The full-size decode of a frame whose original has just gone, removed
+    with it. Returns the bytes that came back.
+
+    The viewer decodes a RAW once and keeps it, about 7 MB a frame, and it
+    can only ever make one from a RAW on this disk; with the RAW in iCloud it
+    shows the preview instead and never downloads one. So the decode is the
+    biggest thing a finished shoot keeps once its RAWs have gone, and nothing
+    else ever removed it: 8.8 GB of decodes outlived one shoot's RAWs. Only
+    the decode of this frame, whose original was read back out of iCloud and
+    matched a moment ago, so it is derived from a photograph that still
+    exists, which is reclaim's own rule for an archived frame's caches."""
+    _raw, cull = parts(shoot)
+    back = 0
+    for ext in (".jpg", ".jpeg", ".JPG", ".JPEG"):
+        q = cull / "decoded" / f"{stem}{ext}"
+        try:
+            st = q.lstat()
+        except OSError:
+            continue
+        if not q.is_file() or q.is_symlink():
+            continue
+        try:
+            q.unlink()
+        except OSError:
+            continue
+        back += st.st_blocks * 512 if st.st_nlink == 1 else 0
+    return back
 
 
 def drop(shoot: Path, apply: bool) -> int:
@@ -975,6 +1420,8 @@ def drop(shoot: Path, apply: bool) -> int:
             continue
         if sha256(up) == arec.get("sha256") and sha256(q) == arec.get("sha256"):
             safe_packed.append((q, up, _sig(q), _sig(up)))
+    for q, ups in spare_packs(shoot, whole, frames):
+        safe_packed.append((q, ups, _sig(q), [_sig(u) for u in ups]))
 
     print(f"  {shoot.name}: {len(safe)} frames verified in iCloud, {len(refused)} refused")
     for p, why in refused[:8]:
@@ -996,7 +1443,7 @@ def drop(shoot: Path, apply: bool) -> int:
     packed_freed = sum(q.stat().st_size for q, *_x in safe_packed)
     print(f"\n  would free {human(freed + packed_freed)} by removing {len(safe)} originals")
     if safe_packed:
-        print(f"  and {len(safe_packed)} packed bursts on this Mac ({human(packed_freed)}) whose copy in iCloud is the same file")
+        print(f"  and {len(safe_packed)} packed bursts on this Mac ({human(packed_freed)}) whose frames are all in iCloud already")
     if extra:
         print(f"  and {extra} further hard links to them inside the shoot (edit/, cull/picks/,")
         print("  reels/), without which not one byte would actually come back")
@@ -1038,10 +1485,16 @@ def drop(shoot: Path, apply: bool) -> int:
             continue
         gone += 1
         back += 0 if elsewhere else size
+        back += _let_decode_go(shoot, p.stem)
     packed_gone = 0
     for q, up, qsig, usig in safe_packed:
-        # The same look again as for a RAW, just before it goes.
-        if _sig(q) != qsig or _sig(up) != usig or not local(up) or _unvouched(up):
+        # The same look again as for a RAW, just before it goes. A spare pack
+        # leans on every copy its frames have up there rather than on one.
+        if isinstance(up, list):
+            moved = _sig(q) != qsig or any(_sig(u) != s or _unvouched(u) for u, s in zip(up, usig))
+        else:
+            moved = _sig(q) != qsig or _sig(up) != usig or not local(up) or _unvouched(up)
+        if moved:
             changed.append(q)
             print(f"    kept  {q.name}: it changed after it was checked; run drop again")
             continue
@@ -1867,6 +2320,38 @@ def show_status(shoot: Path) -> int:
     return 0
 
 
+def _either(code: int, then, p: Path, apply: bool) -> int:
+    """A RAW step and the steps for the rest of a shoot: those run whatever
+    the RAW step found, and a shoot whose RAWs have all gone already but
+    whose exports and sidecars are still here is not "nothing to do"."""
+    rc, did = then(p, apply)
+    return rc if did else max(code, rc)
+
+
+def _after_drop(p: Path, apply: bool) -> tuple[int, bool]:
+    p = Path(p).expanduser().resolve()
+    before = _here_count(p)
+    rc = drop_finished(p, apply)
+    rc = max(rc, gather_sidecars(p, apply) if finished(p) else 0)
+    return rc, _here_count(p) != before or (not apply and _would(p))
+
+
+def _after_pull(p: Path, apply: bool) -> tuple[int, bool]:
+    rc = max(pull_finished(p, apply), return_sidecars(p, apply))
+    return rc, bool((load_manifest(Path(p).expanduser().resolve()).get("finished")))
+
+
+def _here_count(p: Path) -> int:
+    return len(finished_files(p)) + len(sidecar_files(p))
+
+
+def _would(p: Path) -> bool:
+    """Whether a dry run of the steps after drop found anything to do."""
+    rec = load_manifest(p).get("finished") or {}
+    return any(q.relative_to(p).as_posix() in rec for q in finished_files(p)) or bool(
+        finished(p) and sidecar_moves(p))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="./pl archive", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1906,11 +2391,12 @@ def main() -> int:
     # while being recorded in the real shoot's manifest.
     p = library.paths(p.resolve()).shoot
     return {"status": lambda: show_status(p),
-            "push": lambda: push(p, a.apply, a.force, a.form),
+            "push": lambda: max(push(p, a.apply, a.force, a.form), push_finished(p, a.apply),
+                                push_sidecars(p, a.apply)),
             "trim": lambda: trim(p, a.apply, a.only),
             "repack": lambda: repack(p, a.apply),
-            "drop": lambda: drop(p, a.apply),
-            "pull": lambda: pull(p, a.apply),
+            "drop": lambda: _either(drop(p, a.apply), _after_drop, p, a.apply),
+            "pull": lambda: _either(pull(p, a.apply), _after_pull, p, a.apply),
             "expire": lambda: expire(p, a.apply, a.after, a.keepers, a.destroy)}[a.command]()
 
 

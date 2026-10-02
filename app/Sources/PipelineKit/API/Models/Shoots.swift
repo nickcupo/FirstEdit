@@ -201,6 +201,16 @@ public struct StorageHome: FieldDecodable {
     /// Absent from an engine older than the field.
     public let bytes_here: Int?
     public let bytes_here_text: String
+    /// What the shoot's whole folder takes on this disk - the RAWs, and the
+    /// finished photographs, caches and sidecars beside them - and the
+    /// engine's words for it. Absent from an engine older than the field.
+    public let folder_bytes: Int?
+    public let folder_text: String
+
+    /// The figure the library's page shows and sorts by: the whole folder
+    /// where the engine gives it, else what it held before it did.
+    public var size: Int? { folder_bytes ?? bytes_here }
+    public var sizeText: String { folder_bytes != nil ? folder_text : bytes_here_text }
 
     public init(fields f: Fields) throws {
         frames = f.int("frames")
@@ -211,6 +221,8 @@ public struct StorageHome: FieldDecodable {
         error = f.stringOrNil("error")
         bytes_here = f.intOrNil("bytes_here")
         bytes_here_text = f.string("bytes_here_text")
+        folder_bytes = f.intOrNil("folder_bytes")
+        folder_text = f.string("folder_text")
     }
 }
 
