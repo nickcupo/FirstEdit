@@ -2422,6 +2422,7 @@ class Jobs:
         # down or ended - and never while another engine's job runs.
         if not self.running_store().exists():
             threading.Thread(target=_tidy_library, daemon=True).start()
+        threading.Thread(target=_offload_loop, args=(self,), daemon=True).start()
         with self.lock:
             if self.queue:
                 self.asked = len(self.queue)
@@ -3428,6 +3429,96 @@ def _settle_layouts() -> None:
         print(f"could not settle the library's layout: {e}", flush=True)
 
 
+OFFLOAD_EVERY = 600.0
+OFFLOAD_FIRST = 120.0
+# A shoot is tried once and then left for this long, so a copy iCloud will
+# not vouch for, or a file that will not verify, is not hashed again every
+# ten minutes all day.
+OFFLOAD_REST = 3 * 3600.0
+_OFFLOAD_TRIED: dict[tuple[str, str], float] = {}
+
+
+def offload_wanted() -> bool:
+    """library.json's "offload", on unless it says false: whether finished
+    shoots are backed up and taken off this Mac without a button."""
+    try:
+        return json.loads((ROOT / "library.json").read_text()).get("offload", True) is not False
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def _offload_loop(jobs: "Jobs") -> None:
+    time.sleep(OFFLOAD_FIRST)
+    while True:
+        try:
+            offload_step(jobs)
+        except Exception as e:  # noqa: BLE001 - never stops the engine
+            print(f"could not look after finished shoots: {e}", flush=True)
+        time.sleep(OFFLOAD_EVERY)
+
+
+def offload_next(shoots: list[Path]) -> tuple[str, Path] | None:
+    """The one thing to do next for a finished shoot, or None: "push" when
+    something of it is not backed up, else "drop" when iCloud has said it
+    holds something this Mac still has (or still has downloaded). Read off
+    the archive record and lstat; iCloud's word for each copy is asked, and
+    nothing is opened."""
+    import archive as amod
+    if amod.icloud_ready():
+        return None
+    for shoot in shoots:
+        if not amod.finished(shoot):
+            continue
+        whole = amod.load_manifest(shoot)
+        rec_f, rec_s = whole.get("finished") or {}, whole.get(amod.SIDECARS) or {}
+        raw, _ = amod.parts(shoot)
+        mine = [q for q in amod.originals(raw) if amod.local(q)]
+        if any(q.name not in (whole.get("frames") or {}) and q.name not in amod.packed_frames(whole)
+               for q in mine) \
+                or any(q.relative_to(shoot).as_posix() not in rec_f for q in amod.finished_files(shoot)) \
+                or any(q.relative_to(shoot).as_posix() not in rec_s for q in amod.sidecar_files(shoot)):
+            return "push", shoot
+        up = lambda d: d.exists() and amod.uploaded(d) is True   # noqa: E731
+        if any(up(amod.dest_for(shoot, q.name)) for q in mine if q.name in (whole.get("frames") or {})) \
+                or any(up(amod.finished_dest(shoot, rec_f[q.relative_to(shoot).as_posix()]["stored"]))
+                       for q in amod.finished_files(shoot)) \
+                or amod.sidecar_moves(shoot) \
+                or any(amod.uploaded(q) is True for q in amod.evictable(shoot)):
+            return "drop", shoot
+    return None
+
+
+def offload_step(jobs: "Jobs") -> dict | None:
+    """One pass: when nothing is running or waiting, put the next finished
+    shoot's Back Up or Remove from This Mac in the slot. He chose this
+    ("back up, remove at once"): a finished shoot's photographs are in
+    iCloud, read back and vouched for, and off this Mac, without a button.
+    Remove is the same verified drop as the button's, and refuses whatever
+    it cannot check."""
+    if not offload_wanted():
+        return None
+    with jobs.lock:
+        if (jobs.proc and jobs.proc.poll() is None) or jobs.queue or jobs.held:
+            return None
+    now = time.monotonic()
+    todo = sorted(p for p in shoots_dir().iterdir() if p.is_dir()) if shoots_dir().is_dir() else []
+    nxt = None
+    for shoot in todo:
+        got = offload_next([shoot])
+        if got and now - _OFFLOAD_TRIED.get((got[0], shoot.name), -OFFLOAD_REST) >= OFFLOAD_REST:
+            nxt = got
+            break
+    if not nxt:
+        return None
+    what, shoot = nxt
+    _OFFLOAD_TRIED[(what, shoot.name)] = now
+    s = Shoot(shoot)
+    jid, started = jobs.enqueue(f"stor-{what}", STOR_TITLES[what].format(n=shoot.name),
+                                _stor_argv(s, what, {}, apply=True), _job_log(s),
+                                shoot=shoot.name, why="finished shoots are kept in iCloud")
+    return {"what": what, "shoot": shoot.name, "id": jid, "started": started}
+
+
 def _clear_strays() -> None:
     """archive.clear_strays over this library, said in the engine's log."""
     try:
@@ -4052,6 +4143,108 @@ def _stor_line(sm: dict, counts: dict, lost: int, total: int = 0) -> str:
     return " · ".join(x for x in (head, f"{human(sm['bytes_here'])} here", up_text, tail) if x)
 
 
+def _first_block(q: Path) -> int | None:
+    """Where on the disk this file's first byte is, or None. Two APFS clones
+    (the same JPEG in export/ and in a delivery folder, copied with Finder)
+    are two inodes over the same blocks, and counted by inode they read as
+    twice the space they take: 25.7 GB of finished photographs that cost 13."""
+    import fcntl
+    import struct
+    try:
+        fd = os.open(q, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return None
+    try:
+        # F_LOG2PHYS_EXT (65): struct log2phys {u32 flags; off_t contig; off_t devoffset}
+        out = fcntl.fcntl(fd, 65, struct.pack("<Iqq", 0, 1, 0))
+        return struct.unpack("<Iqq", out)[2]
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _blocks(paths) -> int:
+    """Bytes on this disk for these files, each inode once and each clone
+    once; 0 for a name iCloud has emptied."""
+    seen: set = set()
+    n = 0
+    for q in paths:
+        try:
+            st = q.lstat()
+        except OSError:
+            continue
+        if not st.st_blocks or (st.st_dev, st.st_ino) in seen:
+            continue
+        seen.add((st.st_dev, st.st_ino))
+        at = _first_block(q) if st.st_size >= 65536 else None
+        if at is not None:
+            if (st.st_dev, "at", at) in seen:
+                continue
+            seen.add((st.st_dev, "at", at))
+        n += st.st_blocks * 512
+    return n
+
+
+def where_it_is(s: "Shoot", sm: dict) -> tuple[list[dict], dict]:
+    """The panel's table: each kind of thing a shoot holds, what of it is on
+    this Mac and what is in iCloud. The panel counted RAWs and nothing else,
+    so a shoot read "in iCloud only" with 27 GB of finished photographs in its
+    folder and 18 GB of iCloud Drive copies still downloaded beside it.
+    Everything here is lstat and the archive record; nothing is opened.
+    Returns the rows and the counts the buttons are gated on."""
+    import archive as amod
+    from common import human
+    folder = s.folder
+    whole = amod.load_manifest(folder)
+    fin_rec = whole.get("finished") or {}
+    sc_rec = whole.get(amod.SIDECARS) or {}
+    fin = amod.finished_files(folder)
+    fin_rel = {q: q.relative_to(folder).as_posix() for q in fin}
+    fin_todo = [q for q in fin if fin_rel[q] not in fin_rec]
+    fin_drop = [q for q in fin if fin_rel[q] in fin_rec]
+    fin_up = {r["stored"] for r in fin_rec.values() if amod.finished_dest(folder, r["stored"]).exists()}
+    fin_back = [rel for rel, r in fin_rec.items() if not amod.local(folder / rel)]
+    sc = amod.sidecar_files(folder)
+    sc_todo = [q for q in sc if q.relative_to(folder).as_posix() not in sc_rec]
+    moves = amod.sidecar_moves(folder) if amod.finished(folder) else []
+    cull = amod.parts(folder)[1]
+    caches = [Path(dp) / f for dp, _d, fs in os.walk(cull) for f in fs] if cull.is_dir() else []
+    up_dir = amod.ARCHIVE / folder.name
+    up_files = [Path(dp) / f for dp, _d, fs in os.walk(up_dir) for f in fs] if up_dir.is_dir() else []
+    down = _blocks(up_files)
+    evictable = amod.evictable(folder) if amod.finished(folder) else []
+    fin_bytes = _blocks(fin)
+    rows = [
+        {"id": "raw", "label": "RAW files",
+         "mac": sm["bytes_here"], "mac_text": f"{sm['here']:,} · {human(sm['bytes_here'])}" if sm["here"] else "none",
+         "icloud_text": f"{sm['up']:,} · {human(sm['bytes_up'])}" if sm["up"] else "none"},
+        {"id": "finished", "label": "Finished photos",
+         "mac": fin_bytes, "mac_text": f"{len(fin):,} · {human(fin_bytes)}" if fin else "none",
+         "icloud_text": f"{len(fin_up):,}" if fin_up else "none",
+         "note": (f"{len(fin_todo):,} not backed up yet" if fin_todo else "")},
+        {"id": "sidecars", "label": "Sidecars (your edits)",
+         "mac": _blocks(sc), "mac_text": f"{len(sc):,}" if sc else "none",
+         "icloud_text": f"{len(sc_rec):,}" if sc_rec else "none",
+         "note": (f"{len(sc_todo):,} not backed up yet" if sc_todo else "")},
+        {"id": "previews", "label": "Previews and thumbnails",
+         "mac": _blocks(caches), "mac_text": human(_blocks(caches)) if caches else "none",
+         "icloud_text": "kept on this Mac", "note": ""},
+        {"id": "downloaded", "label": "iCloud copies downloaded here",
+         "mac": down, "mac_text": human(down) if down else "none",
+         "icloud_text": "", "note": (f"{human(_blocks(evictable))} can be left in iCloud only"
+                                    if evictable else "")},
+    ]
+    gate = {"finished_todo": len(fin_todo), "finished_todo_text": human(_blocks(fin_todo)),
+            "sidecars_todo": len(sc_todo), "finished_droppable": len(fin_drop),
+            "finished_droppable_text": human(_blocks(fin_drop)), "finished_pullable": len(fin_back),
+            "sidecars_to_gather": len(moves), "evictable": len(evictable),
+            "evictable_text": human(_blocks(evictable)),
+            "on_this_mac": _folder_bytes(folder) + down,
+            "on_this_mac_text": human(_folder_bytes(folder) + down)}
+    return rows, gate
+
+
 def storage(s: Shoot) -> dict:
     """The whole panel in one answer. lstat only, so it never materialises an
     evicted file: measured at 0.15 s on the 1157-frame shoot."""
@@ -4104,6 +4297,8 @@ def storage(s: Shoot) -> dict:
     sm["raw_up"] = sum(1 for n in whole.get("frames") or {} if amod.dest_for(s.folder, n).exists())
     sm["packed_up"] = sum(1 for f in whole.get("packed") or {} if amod.packed_dest(s.folder, f).exists())
     sm["packed_here"] = len(amod.local_packed(s.folder))
+    kinds, more = where_it_is(s, sm)
+    sm.update(more)
     m = rmod.measure(rmod.Shoot(s.folder))
     cnt, tot, where = rmod.last_copy_renderings(m["shoot"])
     lib = {}
@@ -4116,7 +4311,7 @@ def storage(s: Shoot) -> dict:
     days = amod.retention(s.folder)
     return {
         "name": s.folder.name,
-        "archive": sm, "states": counts, "order": list(STOR_BAR),
+        "archive": sm, "kinds": kinds, "states": counts, "order": list(STOR_BAR),
         "words": {k: _state_words(k, *spoken[k]) for k in STOR_BAR},
         "glyphs": {k: list(glyph[k]) for k in STOR_BAR},
         "line": _stor_line(sm, counts, lost, len(s.rows())),
@@ -4332,16 +4527,22 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
         counts["finished"] = int(f.group(1)) if f else 0
         sc = re.search(r"^\s*and (\d+) sidecars of frames in iCloud", text, re.M)
         counts["sidecars"] = int(sc.group(1)) if sc else 0
+        ev = re.search(r"^\s*and (\d+) copies in iCloud Drive still downloaded on this Mac \((.+?)\)", text, re.M)
+        counts["evict"] = int(ev.group(1)) if ev else 0
         if counts["finished"]:
             label = (f"{label}, and {_s(counts['finished'], 'finished photo')}" if label
                      else f"Remove {_s(counts['finished'], 'finished photo')} and free {f.group(2)}")
+        elif counts["evict"] and not label:
+            label = f"Free {ev.group(2)} of iCloud Drive copies"
         elif counts["sidecars"] and not label:
             label = f"Tidy {_s(counts['sidecars'], 'sidecar')} into decisions/sidecars"
-        if counts["finished"] or counts["sidecars"]:
+        if counts["evict"] and label and not label.startswith("Free "):
+            label += f", and free {ev.group(2)} of iCloud Drive copies"
+        if counts["finished"] or counts["sidecars"] or counts["evict"]:
             # "nothing is safe to remove" is the RAWs' answer alone.
             ready = "REFUSED" not in text
         ready = ready and (counts.get("frames", 0) > 0 or counts.get("packed", 0) > 0
-                           or counts["finished"] > 0 or counts["sidecars"] > 0)
+                           or counts["finished"] > 0 or counts["sidecars"] > 0 or counts["evict"] > 0)
     elif what == "pull":
         m = re.search(r"(\d+) frames to bring back, (.+)$", text, re.M)
         if m:
@@ -4753,8 +4954,8 @@ def plan_words(line: str) -> str | None:
 
 
 STOR_TITLES = {"push": "backing up {n} to iCloud",
-               "drop": "removing the local RAWs of {n}",
-               "pull": "bringing the RAWs of {n} back",
+               "drop": "removing what of {n} is safe in iCloud from this Mac",
+               "pull": "bringing {n} back from iCloud",
                "expire": "letting go of the RAWs of {n} in iCloud",
                "reclaim": "taking back {n}'s cache",
                "check": "checking every original of {n}",

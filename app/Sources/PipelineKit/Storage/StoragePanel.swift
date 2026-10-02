@@ -77,6 +77,7 @@ public struct StoragePanel: View {
                 Section { PausedNote(paused) }
             }
             whereTheyAre
+            whatIsWhere
             renderings
             frequentActions
             retentionLock
@@ -139,6 +140,44 @@ public struct StoragePanel: View {
         (CommandTable.ID.checkEvery, nil), (CommandTable.ID.takeBackCache, .reclaim),
         (CommandTable.ID.removeLocal, .drop), (CommandTable.ID.letGo, .expire),
     ]
+
+    // MARK: what is on this Mac, kind by kind
+
+    /// The answer to "what is still downloaded": each kind of thing the shoot
+    /// holds, on this Mac and in iCloud, in the engine's words. The panel
+    /// counted RAWs alone and read "in iCloud only" over 45 GB on this disk.
+    @ViewBuilder private var whatIsWhere: some View {
+        if let s = model.storage, !s.kinds.isEmpty {
+            Section {
+                Grid(alignment: .leading, horizontalSpacing: Tokens.Metric.relatedGap, verticalSpacing: 6) {
+                    GridRow {
+                        Text("")
+                        Text(Strings.Storage.thisMac).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(Strings.Storage.iCloud).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    ForEach(s.kinds) { k in
+                        GridRow {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(k.label)
+                                if !k.note.isEmpty {
+                                    Text(k.note).font(.footnote).foregroundStyle(.secondary)
+                                }
+                            }
+                            Text(k.mac_text).countStyle()
+                            Text(k.icloud_text).countStyle().foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .accessibilityIdentifier("storage.kinds")
+                if !s.archive.on_this_mac_text.isEmpty {
+                    LabeledContent(Strings.Storage.onThisMac) { Text(s.archive.on_this_mac_text).countStyle() }
+                }
+            } header: {
+                Text(Strings.Storage.whatIsWhere)
+            }
+        }
+    }
 
     // MARK: where they are
 

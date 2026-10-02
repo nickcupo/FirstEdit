@@ -23,6 +23,10 @@ public struct Storage: FieldDecodable, Hashable {
     /// The one line at the top of the panel.
     public let line: String
     public let cache: StorageCache
+    /// Each kind of thing the shoot holds - RAWs, finished photos, sidecars,
+    /// previews, iCloud copies downloaded here - and where it is. Empty from
+    /// an engine older than the field.
+    public let kinds: [StorageKind]
     public let retain: Retain
     public let icloud: String?
     public let free: Int
@@ -39,6 +43,9 @@ public struct Storage: FieldDecodable, Hashable {
         }
         line = f.string("line")
         cache = StorageCache(fields: f.object("cache") ?? Fields([:]))
+        kinds = (f["kinds"]?.arrayValue ?? []).compactMap { v in
+            v.objectValue.map { StorageKind(fields: Fields($0)) }
+        }
         retain = Retain(fields: f.object("retain") ?? Fields([:]))
         icloud = f.stringOrNil("icloud")
         free = f.int("free")
@@ -57,6 +64,13 @@ public struct StorageArchive: Sendable, Hashable {
     /// Which form the copies take: ARWs in iCloud, packed bursts in iCloud,
     /// packed bursts in the shoot on this Mac.
     public let raw_up, packed_up, packed_here: Int
+    /// What the buttons do beyond the RAWs: finished photographs and sidecars
+    /// not backed up yet, finished photographs that Remove would take,
+    /// finished photographs to bring back, sidecars to gather, and iCloud
+    /// Drive copies still downloaded on this Mac that can be left in iCloud.
+    public let finished_todo, sidecars_todo, finished_droppable, finished_pullable: Int
+    public let sidecars_to_gather, evictable: Int
+    public let finished_todo_text, finished_droppable_text, evictable_text, on_this_mac_text: String
 
     init(fields f: Fields) {
         frames = f.int("frames"); here = f.int("here"); here_evicted = f.int("here_evicted")
@@ -68,6 +82,24 @@ public struct StorageArchive: Sendable, Hashable {
         todo_text = f.string("todo_text"); pullable_text = f.string("pullable_text")
         droppable_text = f.string("droppable_text")
         raw_up = f.int("raw_up"); packed_up = f.int("packed_up"); packed_here = f.int("packed_here")
+        finished_todo = f.int("finished_todo"); sidecars_todo = f.int("sidecars_todo")
+        finished_droppable = f.int("finished_droppable"); finished_pullable = f.int("finished_pullable")
+        sidecars_to_gather = f.int("sidecars_to_gather"); evictable = f.int("evictable")
+        finished_todo_text = f.string("finished_todo_text")
+        finished_droppable_text = f.string("finished_droppable_text")
+        evictable_text = f.string("evictable_text"); on_this_mac_text = f.string("on_this_mac_text")
+    }
+}
+
+/// One row of the panel's table: a kind of thing, and the engine's words for
+/// how much of it is on this Mac and in iCloud.
+public struct StorageKind: Sendable, Hashable, Identifiable {
+    public let id, label, mac_text, icloud_text, note: String
+    public let mac: Int
+
+    init(fields f: Fields) {
+        id = f.string("id"); label = f.string("label"); mac_text = f.string("mac_text")
+        icloud_text = f.string("icloud_text"); note = f.string("note"); mac = f.int("mac")
     }
 }
 

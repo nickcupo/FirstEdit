@@ -23,6 +23,14 @@ extension Strings {
               "Under a row of frames recorded as archived and found nowhere: what he can do next.")
         }
         public static var thisMac: String { s("storage.thisMac", "This Mac", "The first glyph cell.") }
+        public static var whatIsWhere: String {
+            s("storage.whatIsWhere", "What is on this Mac",
+              "The group listing each kind of file the shoot holds, on this Mac and in iCloud.")
+        }
+        public static var onThisMac: String {
+            s("storage.onThisMac", "Taking up on this Mac",
+              "The shoot's folder plus its iCloud Drive copies still downloaded here.")
+        }
         public static var iCloud: String { s("storage.iCloud", "iCloud", "The second glyph cell.") }
 
         // MARK: the frequent actions, first and together
@@ -83,7 +91,7 @@ extension Strings {
               "Why Remove from This Mac is off on a shoot copied to iCloud before it was finished.")
         }
         public static var pushNothing: String {
-            s("storage.pushNothing", "Nothing on this Mac is waiting to be copied to iCloud.",
+            s("storage.pushNothing", "Everything on this Mac is already backed up to iCloud.",
               "Why Back Up to iCloud is off.")
         }
         public static var nothingInICloud: String {
