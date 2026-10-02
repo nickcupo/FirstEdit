@@ -54,6 +54,25 @@ def test_a_path_in_the_report_carries_no_home_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(evaluate, "PHOTOS", tmp_path)
     assert evaluate._said(tmp_path / "datasets" / "cew") == "$PHOTOS_ROOT/datasets/cew"
     assert evaluate._said(Path("/somewhere/else")) == "/somewhere/else"
+    monkeypatch.setattr(evaluate, "PHOTOS", tmp_path / "photos")
+    monkeypatch.setattr(evaluate, "DEV_DATA", tmp_path / "dev")
+    assert evaluate._said(tmp_path / "dev" / "datasets" / "cew") == "$DEV_DATA/datasets/cew"
+
+
+def test_the_measuring_data_is_kept_out_of_the_library(tmp_path, monkeypatch):
+    """Datasets and face fixtures sat in ~/photos beside the shoots, where
+    they read as clutter the app could neither explain nor tidy. They are
+    looked for beside the repo, or wherever PIPELINE_DEV_DATA says."""
+    import check_faces
+    import common
+    monkeypatch.setenv("PIPELINE_DEV_DATA", str(tmp_path / "dev"))
+    assert common.dev_data() == tmp_path / "dev"
+    truth = json.loads((Path(__file__).parent / "faces_truth.json").read_text())
+    got = check_faces.fixture_folder(Path(__file__).parent / "faces_truth.json", truth, None)
+    assert got == tmp_path / "dev" / "fixtures" / "faces"
+    monkeypatch.delenv("PIPELINE_DEV_DATA")
+    assert common.dev_data().name == "photo-pipeline-data"
+    assert "photos" not in common.dev_data().parts
 
 
 def test_a_permutation_p_cannot_be_zero():

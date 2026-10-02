@@ -272,8 +272,8 @@ and the same answers are commands:
 ```bash
 ./pl reclaim report                  # every shoot: originals, decisions, caches, finished work
 ./pl reclaim reclaim <shoot>         # take back derived bytes only (--apply to do it)
-./pl archive push <shoot> --apply    # the RAWs up to iCloud Drive, read back and verified
-./pl archive drop <shoot> --apply    # remove the local RAWs of frames proved to be up there
+./pl archive push <shoot> --apply    # the RAWs, finished photos and sidecars up to iCloud Drive, read back and verified
+./pl archive drop <shoot> --apply    # remove the local RAWs and finished photos proved to be up there
 ./pl archive pull <shoot> --apply    # bring them back down
 ./pl reclaim verify <shoot>          # the originals against their stored checksums
 ```

@@ -1578,6 +1578,15 @@ class Shoot:
             out |= {s for s, raw in raws.items() if taste.is_exported(raw, at)}
         except Exception:  # noqa: BLE001
             pass
+        # And the ones offloaded to iCloud (archive.push_finished, then drop):
+        # gone from export/, still exported. From the record, so nothing up
+        # there is read.
+        try:
+            import archive as amod
+            rec = amod.load_manifest(self.folder).get("finished") or {}
+            out |= {Path(rel).name.split("_DxO")[0].rsplit(".", 1)[0] for rel in rec} & set(raws)
+        except Exception:  # noqa: BLE001
+            pass
         return out
 
     def recorded_keepers(self) -> set[str]:
@@ -2412,7 +2421,7 @@ class Jobs:
         # job of ours can still be writing - its note gone because it was put
         # down or ended - and never while another engine's job runs.
         if not self.running_store().exists():
-            threading.Thread(target=_clear_strays, daemon=True).start()
+            threading.Thread(target=_tidy_library, daemon=True).start()
         with self.lock:
             if self.queue:
                 self.asked = len(self.queue)
@@ -3388,6 +3397,37 @@ def readable_log(log) -> str:
                      for w in [plan_words(l)] if w is not None)[-8000:]
 
 
+def _tidy_library() -> None:
+    """What the engine puts right on its own when it starts and nothing of
+    ours is running: an interrupted pack's leftovers, and a shoot still in an
+    older layout."""
+    _clear_strays()
+    _settle_layouts()
+
+
+def _settle_layouts() -> None:
+    """./pl migrate --apply, on every shoot that still needs it: the decision
+    files out of cull/ into decisions/, the compatibility links left behind,
+    each move verified and journalled so ./pl migrate --undo puts it back.
+    Nine shoots were left half-migrated because the command existed and
+    nothing ran it: 35 files and a dozen missing links."""
+    import argparse
+    import io
+    try:
+        import migrate
+        args = argparse.Namespace(undo=False, apply=True, adopt=False, compat="symlink", forget=False)
+        for shoot in migrate.shoots_under(ROOT):
+            out = io.StringIO()
+            import contextlib
+            with contextlib.redirect_stdout(out):     # its @@ marks are not the engine's
+                acted, _left, refused = migrate.run_shoot(shoot, args, out)
+            if acted:
+                print(f"settled the layout of {shoot.name}: {acted} moved or linked"
+                      + (f", {refused} refused" if refused else ""), flush=True)
+    except Exception as e:  # noqa: BLE001 - tidying never stops the engine
+        print(f"could not settle the library's layout: {e}", flush=True)
+
+
 def _clear_strays() -> None:
     """archive.clear_strays over this library, said in the engine's log."""
     try:
@@ -3891,9 +3931,47 @@ def _stor_home(s: Shoot) -> dict:
     # before the phrase and sorts by, so the shoot to clear first is the one
     # at the top. The same sum as the panel's "36.3 GB here"; no words for
     # nothing, which beside "in iCloud only" would only be noise.
+    #
+    # And the whole folder, not only its RAWs, which the library's page shows
+    # and sorts by: every shoot of his read "in iCloud only"
+    # beside nothing at all while the library held 62 GB, the finished
+    # photographs, decodes and a stray pack nothing had ever offloaded. A
+    # shoot whose finished photographs have no copy up there says so.
     here = sm["bytes_here"]
+    folder = _folder_bytes(s.folder)
+    left = _only_here(s.folder)
+    if left and not bad:
+        phrase = f"{phrase}; {left} finished photo{'' if left == 1 else 's'} only on this Mac"
     return {"frames": frames, "phrase": phrase, "cells": cells, "bad": bad, "lost": lost,
-            "bytes_here": here, "bytes_here_text": human(here) if here else ""}
+            "bytes_here": here, "bytes_here_text": human(here) if here else "",
+            "folder_bytes": folder, "folder_text": human(folder) if folder else "",
+            "finished_only_here": left}
+
+
+_FOLDER_BYTES: dict[str, tuple[float, int]] = {}
+
+
+def _folder_bytes(folder: Path) -> int:
+    """What the shoot's folder takes on this disk, each file once however
+    many names it has (reclaim's count, which agrees with du). Kept for half
+    a minute: the front page asks for every shoot each time it is drawn."""
+    hit = _FOLDER_BYTES.get(str(folder))
+    if hit and time.monotonic() - hit[0] < 30:
+        return hit[1]
+    import reclaim
+    n = reclaim._du_bytes(folder)
+    _FOLDER_BYTES[str(folder)] = (time.monotonic(), n)
+    return n
+
+
+def _only_here(folder: Path) -> int:
+    """Finished photographs in the shoot with no copy recorded in iCloud."""
+    import archive as amod
+    try:
+        rec = amod.load_manifest(folder).get("finished") or {}
+        return sum(1 for q in amod.finished_files(folder) if q.relative_to(folder).as_posix() not in rec)
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _stor_line(sm: dict, counts: dict, lost: int, total: int = 0) -> str:
@@ -4150,6 +4228,15 @@ def _s(n: int, one: str, many: str = "") -> str:
     return f"{n} {one if n == 1 else (many or one + 's')}"
 
 
+def app_log(name: str) -> Path:
+    """Where the log of a job that is the app's own business is kept: the
+    updater's, the first-run setup's. These were written to the top of the
+    photographs folder, beside his shoots, where nothing ever tidied them."""
+    d = support_dir(create=True) / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / name
+
+
 def _stor_argv(s: Shoot, what: str, body: dict, apply: bool) -> list[str]:
     """Exactly the command line he would have typed himself."""
     if what == "reclaim":
@@ -4204,7 +4291,21 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
         for pat in (r"^\s*(\d+ of this shoot's own RAWs are already evicted.*)$",
                     r"^\s*(iCloud Drive is not .*)$"):
             refusals += [x.strip() for x in re.findall(pat, text, re.M)]
-        ready = ready and counts.get("frames", 0) > 0
+        # The finished photographs and the sidecars go up with the RAWs
+        # (archive.push_finished, push_sidecars), and a shoot whose RAWs are
+        # all up already still has them to send.
+        f = re.search(r"^\s*would copy (\d+) finished photos, (.+?), to ", text, re.M)
+        counts["finished"] = int(f.group(1)) if f else 0
+        sc = re.search(r"^\s*and (\d+) sidecars \(your edits\)", text, re.M)
+        counts["sidecars"] = int(sc.group(1)) if sc else 0
+        if not counts.get("frames") and counts["finished"]:
+            bytes_text = f.group(2)
+            label = f"Copy {_s(counts['finished'], 'finished photo')} up, {bytes_text}"
+        elif not counts.get("frames") and counts["sidecars"]:
+            label = f"Copy {_s(counts['sidecars'], 'sidecar')} up"
+        elif counts.get("frames") and counts["finished"]:
+            label += f" and {_s(counts['finished'], 'finished photo')}"
+        ready = ready and (counts.get("frames", 0) > 0 or counts["finished"] > 0 or counts["sidecars"] > 0)
     elif what == "drop":
         # A shoot he has not finished keeps its local RAWs, whatever iCloud
         # holds (archive.drop): a push before Finish is a backup, not a move.
@@ -4227,13 +4328,31 @@ def _parse_plan(what: str, text: str, body: dict) -> dict:
         more = re.search(r"^\s*\.\.\. and (\d+) more$", text, re.M)
         if more:
             refusals.append(f"… and {more.group(1)} more refused for the same kinds of reason")
-        ready = ready and (counts.get("frames", 0) > 0 or counts.get("packed", 0) > 0)
+        f = re.search(r"^\s*and (\d+) finished photos on this Mac \((.+?)\)", text, re.M)
+        counts["finished"] = int(f.group(1)) if f else 0
+        sc = re.search(r"^\s*and (\d+) sidecars of frames in iCloud", text, re.M)
+        counts["sidecars"] = int(sc.group(1)) if sc else 0
+        if counts["finished"]:
+            label = (f"{label}, and {_s(counts['finished'], 'finished photo')}" if label
+                     else f"Remove {_s(counts['finished'], 'finished photo')} and free {f.group(2)}")
+        elif counts["sidecars"] and not label:
+            label = f"Tidy {_s(counts['sidecars'], 'sidecar')} into decisions/sidecars"
+        if counts["finished"] or counts["sidecars"]:
+            # "nothing is safe to remove" is the RAWs' answer alone.
+            ready = "REFUSED" not in text
+        ready = ready and (counts.get("frames", 0) > 0 or counts.get("packed", 0) > 0
+                           or counts["finished"] > 0 or counts["sidecars"] > 0)
     elif what == "pull":
         m = re.search(r"(\d+) frames to bring back, (.+)$", text, re.M)
         if m:
             counts["frames"], bytes_text = int(m.group(1)), m.group(2)
             label = f"Bring {_s(counts['frames'], 'frame')} back"
-        ready = ready and counts.get("frames", 0) > 0
+        f = re.search(r"^\s*and (\d+) finished photos to bring back, (.+)$", text, re.M)
+        counts["finished"] = int(f.group(1)) if f else 0
+        if counts["finished"]:
+            label = (f"{label} and {_s(counts['finished'], 'finished photo')}" if counts.get("frames")
+                     else f"Bring {_s(counts['finished'], 'finished photo')} back")
+        ready = ready and (counts.get("frames", 0) > 0 or counts["finished"] > 0)
     elif what == "expire":
         for key, pat in (("protected", r"^\s*(\d+)\s+frames you kept, protected"),
                          ("spare", r"^\s*(\d+)\s+archived spares"),
@@ -4633,7 +4752,7 @@ def plan_words(line: str) -> str | None:
     return line
 
 
-STOR_TITLES = {"push": "copying the RAWs of {n} to iCloud",
+STOR_TITLES = {"push": "backing up {n} to iCloud",
                "drop": "removing the local RAWs of {n}",
                "pull": "bringing the RAWs of {n} back",
                "expire": "letting go of the RAWs of {n} in iCloud",
@@ -5279,6 +5398,23 @@ LEARNING_WAITS_FOR_IDLE = "Learning from it starts once the Mac has been left al
 LEARNING_WAITS_FOR_SLOT = "Learning from it starts when the work running now is done."
 
 
+def backup_on_finish(jobs: "Jobs", s: "Shoot") -> dict:
+    """Finishing a shoot starts its Back Up to iCloud: the RAWs, the finished
+    photographs and the sidecars, each read back before it is recorded. It
+    only copies; nothing leaves this Mac until Remove from This Mac is
+    pressed on the shoot that would lose it. A finished shoot used to keep
+    everything here until someone remembered the Storage panel, and its
+    photographs had no second copy anywhere until then."""
+    import archive as amod
+    bad = amod.icloud_ready()
+    if bad:
+        return {"ok": False, "skipped": bad}
+    jid, started = jobs.enqueue("stor-push", STOR_TITLES["push"].format(n=s.folder.name),
+                                _stor_argv(s, "push", {}, apply=True), _job_log(s),
+                                shoot=s.folder.name, why="finished")
+    return {"ok": True, "id": jid, "running": started, "queued": not started}
+
+
 def learn_from_finished(jobs: Jobs, shoot: str) -> dict:
     """What marking a shoot finished does about learning, by Settings ▸
     Learning: nothing when automatic learning is off; the ask written down
@@ -5433,7 +5569,11 @@ def _ig_exports(s: Shoot) -> dict[str, Path]:
         if hit and time.monotonic() - hit[0] < _EXPORTS_FOR:
             return hit[1]
         import exports
-        have = dict(sorted(exports.files(s.folder, s.exported()).items()))
+        # Only what is on this Mac: every picture here is read to draw the
+        # wall, and an offloaded one read so would come down from iCloud,
+        # a whole shoot's worth for opening a page.
+        import archive as amod
+        have = {k: v for k, v in sorted(exports.files(s.folder, s.exported()).items()) if amod.local(v)}
         _IG_EXPORTS[key] = (time.monotonic(), have)
         return have
 
@@ -6882,7 +7022,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not UPDATE.get("url"):
                     return self._json({"error": "no update to download"})
                 return self._job(body, "update", f"downloading version {UPDATE.get('latest')}",
-                                 [PY, str(HERE / "update.py"), "--download", UPDATE["url"]], ROOT / "update.log")
+                                 [PY, str(HERE / "update.py"), "--download", UPDATE["url"]], app_log("update.log"))
             if u.path == "/api/update/install":
                 # Only the app's own engine swaps the app. A studio run from a
                 # checkout finds the app's support folder, and so its staged
@@ -6967,7 +7107,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/setup":
                 # First run: CLIP into the cache, with a bar. Everything else is in the bundle or the checkout.
                 return self._job(body, "setup", "getting the picture model, once",
-                                 [PY, str(HERE / "fetch_clip.py")], ROOT / "setup.log")
+                                 [PY, str(HERE / "fetch_clip.py")], app_log("setup.log"))
             s = self._shoot(body.get("name", ""))
             if not s:
                 return self._json({"error": "no such shoot"}, 404)
@@ -7022,6 +7162,11 @@ class Handler(BaseHTTPRequestHandler):
                             out["learning"] = learn_from_finished(self.jobs, s.folder.name)
                         except Exception as e:  # noqa: BLE001
                             out["learning"] = {"error": _refusal(e)}
+                        # And its Back Up to iCloud, behind the learning run.
+                        try:
+                            out["backup"] = backup_on_finish(self.jobs, s)
+                        except Exception as e:  # noqa: BLE001
+                            out["backup"] = {"error": _refusal(e)}
                 if "style" in body and body["style"] in ("normal", "action"):
                     s.set_meta(style=body["style"])
                 return self._json(out)

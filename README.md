@@ -85,7 +85,11 @@ finish the edit.
 ## Packed RAW backups
 
 **Finish ▸ Back Up to iCloud…** sends a shoot's RAWs up *packed* by default.
-Choose *RAW files* on the same sheet to send the ARWs as they are.
+Choose *RAW files* on the same sheet to send the ARWs as they are. Finishing
+a shoot starts its backup on its own, and it takes the finished photographs
+and your sidecars with it. **Remove from This Mac** then clears everything
+that is safely up there, so a finished shoot keeps only its previews and
+decisions on this Mac.
 
 **How it saves space.** A burst is many near-identical frames. Each burst
 becomes one file, `packed/burst-<n>.roll`, holding every frame of that burst,

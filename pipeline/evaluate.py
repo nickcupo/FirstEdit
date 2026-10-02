@@ -57,7 +57,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import cull as cmod  # noqa: E402
 import library  # noqa: E402
-from common import decision_path  # noqa: E402
+from common import decision_path, dev_data  # noqa: E402
 REPO = HERE.parent
 PHOTOS = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
 OUT = REPO / "tests" / "eval.md"
@@ -76,8 +76,9 @@ def eval_cache() -> Path:
 
 
 CACHE = eval_cache()
-PETS_DIR = Path(os.environ.get("PETS_DIR", PHOTOS / "datasets" / "oxford-pets")).expanduser()
-CEW_DIR = Path(os.environ.get("CEW_DIR", PHOTOS / "datasets" / "cew")).expanduser()
+DEV_DATA = dev_data()
+PETS_DIR = Path(os.environ.get("PETS_DIR", DEV_DATA / "datasets" / "oxford-pets")).expanduser()
+CEW_DIR = Path(os.environ.get("CEW_DIR", DEV_DATA / "datasets" / "cew")).expanduser()
 
 # The cull's shipped defaults, read from the cull rather than restated. This
 # harness applies the veto chain itself rather than running the cull (a cull
@@ -199,11 +200,14 @@ def _cache_save(name: str, fp: str, frames: dict) -> None:
 
 def _said(p: Path) -> str:
     """A path as it goes into the report: under $PHOTOS_ROOT where it is in
-    the library, so the file that ships in the repo carries no home folder."""
-    try:
-        return "$PHOTOS_ROOT/" + str(Path(p).resolve().relative_to(PHOTOS.resolve()))
-    except ValueError:
-        return str(p)
+    the library and $DEV_DATA where it is a dataset, so the file that ships
+    in the repo carries no home folder."""
+    for name, root in (("$PHOTOS_ROOT", PHOTOS), ("$DEV_DATA", DEV_DATA)):
+        try:
+            return f"{name}/" + str(Path(p).resolve().relative_to(Path(root).resolve()))
+        except ValueError:
+            pass
+    return str(p)
 
 
 def _face_to_dict(fc) -> dict:

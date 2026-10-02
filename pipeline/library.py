@@ -232,6 +232,13 @@ class ShootPaths:
         return self.shoot / "edit"
 
     @property
+    def sidecars(self) -> Path:
+        """Where the sidecars of frames whose RAWs are in iCloud are kept, out
+        of raw/ and edit/, which would otherwise hold nothing else. Read by
+        everything that learns from his edits, alongside raw/ and edit/."""
+        return self.decisions / "sidecars"
+
+    @property
     def export(self) -> Path:
         return self.shoot / "export"
 

@@ -70,6 +70,17 @@ def support_dir(create: bool = False) -> Path:
     return out
 
 
+def dev_data() -> Path:
+    """<PIPELINE_DEV_DATA>, else photo-pipeline-data beside this repo: the
+    datasets, face fixtures and look trials the measuring tools read.
+
+    Never the library. They lived in ~/photos beside his shoots (datasets/,
+    fixtures/, looks/), where the app counted them as clutter it could not
+    explain and nothing a photographer does would ever tidy them."""
+    env = os.environ.get("PIPELINE_DEV_DATA")
+    return Path(env).expanduser() if env else HERE.parent.parent / "photo-pipeline-data"
+
+
 def _find_ext() -> Path:
     """A private extension for one domain (its own studio steps, commands and
     moment prompts; contract in README.md under "Extensions") is looked for at

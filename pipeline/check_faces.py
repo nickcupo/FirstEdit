@@ -25,10 +25,14 @@ import cv2
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 TRUTH = Path(__file__).resolve().parent.parent / "tests" / "faces_truth.json"
 PHOTOS = Path(os.environ.get("PHOTOS_ROOT", Path.home() / "photos")).expanduser()
+DEV = "$DEV_DATA/"
 
 
 def fixture_folder(truth_path: Path, truth: dict, arg: str | None) -> Path:
     """Where the frames this truth file is about live.
+
+    "$DEV_DATA/fixtures/faces" is under common.dev_data(), beside the repo
+    and out of the library, which is where the fixtures are kept now.
 
     A folder named in the truth file as "~/photos/fixtures/faces" is a folder
     inside the library, and the library is wherever PHOTOS_ROOT says it is.
@@ -38,6 +42,9 @@ def fixture_folder(truth_path: Path, truth: dict, arg: str | None) -> Path:
     whatever PHOTOS_ROOT was set to. A relative folder is relative to the
     repo, which is where the pet fixtures live."""
     named = arg if arg and not arg.endswith(".json") else truth["folder"]
+    if named.startswith(DEV):
+        from common import dev_data
+        return dev_data() / named[len(DEV):]
     p = Path(named)
     home = str(Path("~/photos").expanduser())
     if str(p).startswith("~/photos/") or str(p.expanduser()).startswith(home + "/"):

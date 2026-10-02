@@ -29,7 +29,7 @@ ratings. DxO PhotoLab is needed only to open what the presets step writes.
 | `python -m compileall -q pipeline` | nothing | every module parses | silent |
 | `swift test --package-path app` | full Xcode with an SDK of 26 or newer | the app: the key map's two rules and, in `KeyParityTests`, that a key means one thing on every page with photographs, the stacks, the decoders, the first launch's move, what the storage panel may claim | all pass |
 | `python -m pytest tests -q` | the venv | the sidecar writer and what a Base may be built from, what each other editor's file carries and what it drops, that the answer key is found in `decisions/` with no symlink to help, the two rules that keep `archive expire` from destroying a frame, and what the storage panel is allowed to claim | all pass |
-| `./pl check` | `~/photos/fixtures/faces` (my frames; not in the repo) | the face judge's verdicts on 94 frames settled by eye have not moved | 94 of 94 |
+| `./pl check` | `../photo-pipeline-data/fixtures/faces` (my frames; not in the repo; `PIPELINE_DEV_DATA` moves it) | the face judge's verdicts on 94 frames settled by eye have not moved | 94 of 94 |
 | `./pl bench` | shoots with a `selects.json` | how many of the frames you kept survive, and the ranking's precision | writes `tests/bench.md` |
 | `./pl evaluate` | the above, plus CEW and Oxford-IIIT Pet where you have them | every measurement with its n, held out by shoot; rules that fired on nothing get a row saying so | writes `tests/eval.md` |
 

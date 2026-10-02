@@ -604,7 +604,9 @@ they look.
 settled by eye against the judge's own numbers (`tests/faces_truth.json`)
 and reports any that flipped. Those frames are three of my shoots
 (portraits, the lounge, the dog); none are from the action shoot, which is
-a gap. They live outside the repo in `~/photos/fixtures/faces`.
+a gap. They live outside the repo and outside the photo library, in
+`fixtures/faces` under `photo-pipeline-data/` beside the repo (or wherever
+`PIPELINE_DEV_DATA` points), with the datasets `evaluate.py` reads.
 
 `./pl check tests/pets_truth.json` runs anywhere: 24 cats and dogs from the
 Oxford-IIIT Pet dataset (CC BY-SA 4.0, in `tests/fixtures/pets`) whose
@@ -664,8 +666,16 @@ originals and are never taken back.
 
 `./pl archive push <shoot>` copies a shoot's RAWs into iCloud Drive and reads
 them back, finished or not, so a card can be backed up the night it is
-copied; it deletes nothing, and nothing is uploaded unless you ask. `drop`
-then removes the local copies, and only of frames it has proved are up there.
+copied; it deletes nothing, and nothing is uploaded unless you ask (Finish
+This Shoot asks: it puts a Back Up in line). The finished photographs go up
+with them (export/, edit/edited/, reels/, the delivery folders; one copy of
+each photograph however many folders it is filed in, under `finished/`), and
+so does every sidecar, again whenever it changes. `drop` then removes the
+local copies, and only of what it has proved is up there: the RAWs, each
+frame's full-size decode with it, the finished photographs, and any packed
+burst on this Mac whose every frame is already up. The sidecars of frames
+whose RAWs have gone are gathered into `decisions/sidecars/`, which the
+learner reads, and go back beside their RAWs on `pull`; none is deleted.
 It refuses a shoot that is not marked finished, because an unfinished shoot's
 RAWs are about to be read again. Two things about iCloud make the obvious
 version of this wrong, and both are silent: macOS with Optimise Mac Storage

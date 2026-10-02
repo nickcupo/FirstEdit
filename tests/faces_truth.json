@@ -1,5 +1,5 @@
 {
- "folder": "~/photos/fixtures/faces",
+ "folder": "$DEV_DATA/fixtures/faces",
  "sharp_floor": 1.9,
  "frames": {
   "TSC04127": {
